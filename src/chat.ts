@@ -11,7 +11,7 @@ export class Chat {
       apiKey: apikey,
       baseURL: process.env.GROQ_API_ENDPOINT || 'https://api.groq.com/openai/v1',
     });
-    this.model = 'compound-beta';
+    this.model = process.env.GROQ_MODEL || 'compound-beta';
   }
 
   private generatePrompt = (patch: string) => {

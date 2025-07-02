@@ -1,8 +1,8 @@
 {
-  "name": "cr-bot",
+  "name": "compound-reviewer",
   "version": "1.0.0",
   "private": true,
-  "description": "A Probot app",
+  "description": "A PR review bot powered by Groq's Compound Beta model",
   "author": "anc95",
   "license": "ISC",
   "type": "module",
@@ -11,12 +11,16 @@
     "probot",
     "github",
     "probot-app",
-    "code review"
+    "code review",
+    "groq",
+    "compound-beta",
+    "ai",
+    "pr-review"
   ],
   "scripts": {
     "start": "node -r dotenv/config ./dist/index.js",
     "test": "jest",
-    "build": "rm -rf dist && rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript && ncc build src/github-action.cjs -o action"
+    "build": "rm -rf dist && rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript"
   },
   "dependencies": {
     "@probot/adapter-aws-lambda-serverless": "^3.0.2",

@@ -1,8 +1,53 @@
-# CodeReview BOT
+# Compound Reviewer Bot
 
-> A code review robot powered by Groq's Compound Beta model
+> A code review robot powered by Groq's Compound Beta model for automated pull request reviews
 
-Translation Versions: [ENGLISH](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md)
+## Usage
+
+### 1. Create a GitHub App
+- Go to https://github.com/settings/apps/new
+- Set the webhook URL to your deployed server (e.g., `https://your-app-url/api/github/webhooks`)
+- Set permissions:
+  - Repository: Contents (Read), Pull requests (Read & Write), Issues (Read & Write), Actions (Read)
+  - Subscribe to Pull request events
+- Download your private key after creation
+- Note your App ID, Client Secret, and Webhook Secret
+
+### 2. Configure Environment Variables
+Create a `.env` file in your project root:
+```
+APP_ID=your_app_id
+PRIVATE_KEY=your_private_key_contents
+WEBHOOK_SECRET=your_webhook_secret
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=compound-beta
+```
+
+### 3. Install Dependencies and Build
+```sh
+npm install
+npm run build
+```
+
+### 4. Run Locally (for development)
+```sh
+npm start
+```
+Visit http://localhost:3000 for setup instructions.
+
+### 5. Deploy
+Deploy to your preferred platform (Vercel, Heroku, AWS, etc.) and set the environment variables in your host's dashboard.
+
+### 6. Install the App on Your Repository
+- Go to your app's page on GitHub and install it on your target repository.
+
+### 7. Test
+- Create a pull request in your repository. The bot will automatically review the PR and post comments.
+
+## Notes
+- The bot only works as a GitHub App (not as a GitHub Action).
+- Make sure your webhook URL is accessible from GitHub.
+- For more details, see the Probot documentation: https://probot.github.io/docs/
 
 ## Bot Usage
 
@@ -10,7 +55,7 @@ Translation Versions: [ENGLISH](./README.md) | [简体中文](./README.zh-CN.md)
 
 ### Install
 
-Install: [apps/cr-gpt](https://github.com/apps/cr-gpt);
+Install: [apps/compound-reviewer](https://github.com/apps/compound-reviewer);
 
 ### Configuration
 
@@ -54,7 +99,7 @@ jobs:
     # if: ${{ contains(github.event.*.labels.*.name, 'gpt review') }} # Optional; to run only when a label is attached
     runs-on: ubuntu-latest
     steps:
-      - uses: aj-groq/Compound-Reviewer@main
+      - uses: your-username/compound-reviewer@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
