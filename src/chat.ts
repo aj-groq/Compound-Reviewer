@@ -18,7 +18,7 @@ export class Chat {
         ? `Answer me in ${process.env.LANGUAGE},`
         : '';
 
-    const userPrompt = process.env.PROMPT || 'Please review the following code patch. Focus on potential bugs, risks, and improvement suggestions.';
+    const userPrompt = 'Please review the following code patch. Focus on potential bugs, risks, and improvement suggestions. Try to be concise and to the point.';
     
     const jsonFormatRequirement = '\nProvide your feedback in a strict JSON format with the following structure:\n' +
         '{\n' +
@@ -32,12 +32,9 @@ export class Chat {
     `;
   };
 
-  public codeReview = async (patch: string): Promise<{ lgtm: boolean, review_comment: string }> => {
+  public codeReview = async (patch: string): Promise<string | { lgtm: boolean, review_comment: string }> => {
     if (!patch) {
-      return {
-        lgtm: true,
-        review_comment: ""
-      };
+      return "";
     }
     const prompt = this.generatePrompt(patch);
     const res = await this.groq.chat.completions.create({
@@ -58,17 +55,14 @@ export class Chat {
     if (res.choices.length) {
       try {
         const json = JSON.parse(res.choices[0].message.content || "");
+        if (json.lgtm && json.review_comment) {
+          return json.review_comment;
+        }
         return json;
       } catch (e) {
-        return {
-          lgtm: false,
-          review_comment: res.choices[0].message.content || ""
-        };
+        return res.choices[0].message.content || "";
       }
     }
-    return {
-      lgtm: true,
-      review_comment: ""
-    };
+    return "";
   };
 }

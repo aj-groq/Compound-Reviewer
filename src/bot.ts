@@ -158,10 +158,16 @@ export const robot = (app: Probot) => {
         }
         try {
           const res = await chat?.codeReview(patch);
-          if (!res.lgtm && !!res.review_comment) {
+          let reviewComment = "";
+          if (typeof res === "string") {
+            reviewComment = res;
+          } else if (res && typeof res === "object" && "review_comment" in res) {
+            reviewComment = res.review_comment;
+          }
+          if (reviewComment) {
             ress.push({
               path: file.filename,
-              body: res.review_comment,
+              body: reviewComment,
               position: patch.split('\n').length - 1,
             })
           }
