@@ -9,5 +9,4 @@ function subtract(a, b) {
   return a - c;
 }
 
-
 export default { add, multiply, subtract }; 
