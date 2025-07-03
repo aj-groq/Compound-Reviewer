@@ -3,19 +3,8 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 const esbuild = require('rollup-plugin-esbuild').default;
-const commonjs = require('@rollup/plugin-commonjs');
-const { nodeResolve } = require('@rollup/plugin-node-resolve');
 
 export default defineConfig([
-  {
-    input: 'middleware.ts',
-    output: {
-      file: 'dist/middleware.js',
-      format: 'esm',
-      inlineDynamicImports: true,
-    },
-    plugins: [esbuild(), commonjs(), nodeResolve()],
-  },
   {
     input: 'src/bot.ts',
     output: {

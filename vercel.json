@@ -1,13 +1,15 @@
 {
-  "functions": {
-    "api/github/webhooks/index.ts": {
-      "maxDuration": 30
-    }
-  },
-  "rewrites": [
+  "version": 2,
+  "builds": [
     {
-      "source": "/api/github/webhooks",
-      "destination": "/api/github/webhooks/index.ts"
+      "src": "api/webhooks.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/webhooks",
+      "dest": "/api/webhooks"
     }
   ]
 }
