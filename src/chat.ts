@@ -9,7 +9,6 @@ export class Chat {
   constructor(apikey: string) {
     this.groq = new Groq({
       apiKey: apikey,
-      baseURL: process.env.GROQ_API_ENDPOINT || 'https://api.groq.com/openai/v1',
     });
     this.model = process.env.GROQ_MODEL || 'compound-beta';
   }
