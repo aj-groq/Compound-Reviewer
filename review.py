@@ -46,7 +46,7 @@ def calculate_standard_deviation(numbers: list[int | float]) -> float:
 def calculate_quartiles(numbers: list[int | float]) -> tuple[float, float, float]:
     if not numbers:
         raise ValueError("Cannot calculate quartiles of an empty list")
-    if len(numbers) < 3:
+    if len(numbers) < 4:
         raise ValueError("Cannot calculate quartiles for a list with less than 3 elements")
 
     non_numeric_types = set()
