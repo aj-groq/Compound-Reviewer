@@ -14,20 +14,16 @@ export class Chat {
   }
 
   private generatePrompt = (patch: string) => {
-    const answerLanguage = process.env.LANGUAGE
-        ? `Answer me in ${process.env.LANGUAGE},`
-        : '';
-
-    const userPrompt = 'Please review the following code patch. Focus on potential bugs, risks, and improvement suggestions. Try to be concise and to the point.';
+    const userPrompt = 'Please review the following code patch. Focus on potential bugs, risks, and improvement suggestions. Your review should be well-formatted and easy to read.';
     
     const jsonFormatRequirement = '\nProvide your feedback in a strict JSON format with the following structure:\n' +
         '{\n' +
         '  "lgtm": boolean, // true if the code looks good to merge, false if there are concerns\n' +
-        '  "review_comment": string // Your detailed review comments. You can use markdown syntax in this string, but the overall response must be a valid JSON\n' +
+        '  "review_comment": string // Your detailed review comments. You should use markdown syntax in this string, but the overall response must be a valid JSON\n' +
         '}\n' +
         'Ensure your response is a valid JSON object.\n';
 
-    return `${userPrompt}${jsonFormatRequirement} ${answerLanguage}:
+    return `${userPrompt}${jsonFormatRequirement}:
     ${patch}
     `;
   };
@@ -55,7 +51,7 @@ export class Chat {
     if (res.choices.length) {
       try {
         const json = JSON.parse(res.choices[0].message.content || "");
-        if (json.lgtm && json.review_comment) {
+        if (json.review_comment) {
           return json.review_comment;
         }
         return json;
