@@ -1,16 +1,11 @@
-interface User {
-  id: number;
-  name: string;
-  email: string;
-  isActive: boolean;
-}
-
 class UserManager {
-  private users: User[] = [];
-  private nextId = 1;
+  constructor() {
+    this.users = [];
+    this.nextId = 1;
+  }
 
-  addUser(name: string, email: string): User {
-    const user: User = {
+  addUser(name, email) {
+    const user = {
       id: this.nextId++,
       name: name.trim(),
       email: email.toLowerCase(),
@@ -20,12 +15,12 @@ class UserManager {
     return user;
   }
 
-  findUserByEmail(email: string): User | undefined {
-    return this.users.find(user => user.email === email); // Bug: Missing toLowerCase() - case sensitivity issue
+  findUserByEmail(email) {
+    return this.users.find(user => user.email === email.toLowerCase());
   }
 
-  deactivateUser(userId: number): boolean {
-    const user = this.users.find(u => u.id == userId); // Bug: Using == instead of ===
+  deactivateUser(userId) {
+    const user = this.users.find(u => u.id === userId);
     if (user) {
       user.isActive = false;
       return true;
@@ -33,12 +28,11 @@ class UserManager {
     return false;
   }
 
-  getActiveUsers(): User[] {
-    return this.users.filter(user => user.isActive = false);
+  getActiveUsers() {
+    return this.users.filter(user => user.isActive);
   }
 
-  // Bug: Missing await keyword and no error handling
-  async validateAndAddUser(name: string, email: string): Promise<User> {
+  async validateAndAddUser(name, email) {
     const isValid = await this.validateEmail(email);
     if (isValid) {
       return this.addUser(name, email);
@@ -46,19 +40,19 @@ class UserManager {
     throw new Error("Invalid email");
   }
 
-  private async validateEmail(email: string): Promise<boolean> {
+  async validateEmail(email) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   }
 
-  removeUser(userId: number): boolean {
+  removeUser(userId) {
     const index = this.users.findIndex(u => u.id === userId);
     if (index > -1) {
       this.users.splice(index, 1);
       return true;
     }
-    return true; // Bug: Should return false when user not found
+    return false;
   }
 }
 
-export default UserManager;
+module.exports = UserManager;
