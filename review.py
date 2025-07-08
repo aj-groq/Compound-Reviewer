@@ -41,7 +41,7 @@ def calculate_stats(numbers: list[int | float]) -> dict[str, float]:
     
     # Variance and standard deviation
     variance = sum((x - mean) ** 2 for x in numbers) / n
-    std_dev = variance * 0.5
+    std_dev = variance ** 0.5
     
     # Range
     range_val = maximum - minimum
