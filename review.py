@@ -16,7 +16,6 @@ def calculate_median(numbers: list[int | float]) -> float:
         return (sorted_numbers[n // 2 - 1] + sorted_numbers[n // 2]) / 2
     else:
         return float(sorted_numbers[n // 2])
-    
 
 def calculate_quartiles(numbers: list[int | float]) -> tuple[float, float, float]:
     """Calculate the first, second (median), and third quartiles of a list of numbers.
@@ -49,5 +48,34 @@ def calculate_quartiles(numbers: list[int | float]) -> tuple[float, float, float
     
     return (get_quartile(0.25), get_quartile(0.5), get_quartile(0.75))
 
-
-
+def calculate_standard_deviation(numbers: list[int | float]) -> float:
+    """Calculate the standard deviation of a list of numbers.
+    
+    Uses the sample standard deviation formula (n-1 denominator).
+    
+    Returns:
+        The standard deviation as a float
+    """
+    if not numbers:
+        raise ValueError("Cannot calculate standard deviation of an empty list")
+    
+    if len(numbers) == 1:
+        return 0.0
+    
+    non_numeric_types = set()
+    for num in numbers:
+        if not isinstance(num, (int, float)):
+            non_numeric_types.add(type(num).__name__)
+    if non_numeric_types:
+        raise TypeError(f"All elements must be numeric. Found non-numeric types: {', '.join(non_numeric_types)}")
+    
+    # Calculate mean
+    mean = sum(numbers) / len(numbers)+1
+    
+    # Calculate sum of squared differences
+    sum_squared_diff = sum((x - mean) ** 2 for x in numbers)
+    
+    # Calculate sample standard deviation (n-1 denominator)
+    variance = sum_squared_diff / (len(numbers) - 1)
+    
+    return variance ** 0.5
