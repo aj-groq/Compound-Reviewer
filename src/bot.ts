@@ -56,24 +56,12 @@ export const robot = (app: Probot) => {
 
       const pull_request = context.payload.pull_request;
 
-      log.debug('pull_request:', pull_request);
-
       if (
         pull_request.state === 'closed' ||
         pull_request.locked
       ) {
         log.info('invalid event payload');
         return 'invalid event payload';
-      }
-
-      const target_label = process.env.TARGET_LABEL;
-      if (
-        target_label &&
-        (!pull_request.labels?.length ||
-          pull_request.labels.every((label) => label.name !== target_label))
-      ) {
-        log.info('no target label attached');
-        return 'no target label attached';
       }
 
       const data = await context.octokit.repos.compareCommits({
@@ -84,10 +72,6 @@ export const robot = (app: Probot) => {
       });
 
       let { files: changedFiles, commits } = data.data;
-
-      log.debug("compareCommits, base:", context.payload.pull_request.base.sha, "head:", context.payload.pull_request.head.sha)
-      log.debug("compareCommits.commits:", commits)
-      log.debug("compareCommits.files", changedFiles)
 
       if (context.payload.action === 'synchronize' && commits.length >= 2) {
         const {
@@ -108,9 +92,9 @@ export const robot = (app: Probot) => {
       const ignorePatterns = (process.env.IGNORE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
       const includePatterns = (process.env.INCLUDE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
 
-      log.debug('ignoreList:', ignoreList);
-      log.debug('ignorePatterns:', ignorePatterns);
-      log.debug('includePatterns:', includePatterns);
+      // log.debug('ignoreList:', ignoreList);
+      // log.debug('ignorePatterns:', ignorePatterns);
+      // log.debug('includePatterns:', includePatterns);
 
       changedFiles = changedFiles?.filter(
         (file) => {
@@ -157,19 +141,43 @@ export const robot = (app: Probot) => {
           continue;
         }
         try {
+          log.debug(`Starting code review for file: ${file.filename}`);
           const res = await chat?.codeReview(patch);
+          log.debug(`Raw response from codeReview:`, res);
+          
           let reviewComment = "";
-          if (typeof res === "string") {
-            reviewComment = res;
-          } else if (res && typeof res === "object" && "review_comment" in res) {
-            reviewComment = res.review_comment;
+          let lgtm: boolean | undefined = undefined;
+          if (typeof res === 'string') {
+            let jsonString = res;
+            const jsonMatch = res.match(/```json\s*([\s\S]*?)\s*```/);
+            if (jsonMatch?.[1]) jsonString = jsonMatch[1].trim();
+            try {
+              const parsed = JSON.parse(jsonString);
+              reviewComment = parsed.review_comment || res;
+              lgtm = typeof parsed.lgtm === 'boolean' ? parsed.lgtm : undefined;
+            } catch {
+              reviewComment = res;
+            }
+          } else if (res && typeof res === 'object') {
+            reviewComment = res.review_comment || String(res || '');
+            lgtm = typeof res.lgtm === 'boolean' ? res.lgtm : undefined;
           }
+          // Format the review body to include LGTM status if available
+          let formattedBody = reviewComment;
+          if (typeof lgtm === 'boolean') {
+            formattedBody = `**LGTM:** ${lgtm}\n\n${reviewComment}`;
+          }
+          log.debug(`Review comment extracted: ${formattedBody?.slice(0, 100)}...`);
           if (reviewComment) {
-            ress.push({
+            const reviewData = {
               path: file.filename,
-              body: reviewComment,
+              body: formattedBody,
               position: patch.split('\n').length - 1,
-            })
+            };
+            log.debug(`Adding review comment for ${file.filename}:`, reviewData);
+            ress.push(reviewData);
+          } else {
+            log.debug(`No review comment generated for ${file.filename}`);
           }
         } catch (e) {
           log.info(`review ${file.filename} failed`, e);
