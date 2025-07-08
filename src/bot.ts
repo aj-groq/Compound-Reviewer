@@ -142,40 +142,74 @@ export const robot = (app: Probot) => {
         }
         try {
           log.debug(`Starting code review for file: ${file.filename}`);
-          const res = await chat?.codeReview(patch);
-          log.debug(`Raw response from codeReview:`, res);
-          
-          let reviewComment = "";
-          let lgtm: boolean | undefined = undefined;
-          if (typeof res === 'string') {
-            let jsonString = res;
-            const jsonMatch = res.match(/```json\s*([\s\S]*?)\s*```/);
-            if (jsonMatch?.[1]) jsonString = jsonMatch[1].trim();
-            try {
-              const parsed = JSON.parse(jsonString);
-              reviewComment = parsed.review_comment || res;
-              lgtm = typeof parsed.lgtm === 'boolean' ? parsed.lgtm : undefined;
-            } catch {
-              reviewComment = res;
+          const res = await chat?.codeReview(patch) as { lgtm: boolean, review_comment: string };
+          const lgtm = res.lgtm;
+          let reviewComment = res.review_comment;
+
+          // Fix Markdown formatting: replace literal '\\n' with '\n'
+          if (typeof reviewComment === 'string') {
+            reviewComment = reviewComment.replace(/\\n/g, '\n');
+            // If it's a single line with multiple '*', insert '\n' before each '*' (except the first one)
+            if (!reviewComment.includes('\n') && (reviewComment.match(/\*/g) || []).length > 1) {
+              reviewComment = reviewComment.replace(/\s*\*/g, '\n*').replace(/^\n/, '');
             }
-          } else if (res && typeof res === 'object') {
-            reviewComment = res.review_comment || String(res || '');
-            lgtm = typeof res.lgtm === 'boolean' ? res.lgtm : undefined;
           }
-          // Format the review body to include LGTM status if available
-          let formattedBody = reviewComment;
-          if (typeof lgtm === 'boolean') {
-            formattedBody = `**LGTM:** ${lgtm}\n\n${reviewComment}`;
-          }
-          log.debug(`Review comment extracted: ${formattedBody?.slice(0, 100)}...`);
+
+          console.log('lgtm in bot:', lgtm);
+          console.log('reviewComment in bot:', reviewComment);
+          const lgtmStatus = lgtm ? '✅ LGTM' : '❌ Needs Changes';
+          log.debug("================================================")
+          log.debug(`LGTM status for ${file.filename}: ${lgtmStatus}`);
+          log.debug(`Type of lgtm: ${typeof lgtm}`);
+          log.debug("================================================")
+          const formattedBody = lgtmStatus ? `> ## ${lgtmStatus}\n\n${reviewComment}` : reviewComment;
+          
+          const preview = formattedBody?.length > 150 ? `${formattedBody.slice(0, 150)}...` : formattedBody;
+          log.debug(`Review comment for ${file.filename}: ${preview}`);
+
           if (reviewComment) {
-            const reviewData = {
-              path: file.filename,
-              body: formattedBody,
-              position: patch.split('\n').length - 1,
-            };
-            log.debug(`Adding review comment for ${file.filename}:`, reviewData);
-            ress.push(reviewData);
+            // Robust patch position calculation
+            let position = null;
+            if (patch) {
+              const patchLines = patch.split('\n');
+              let lineNumber = 0;
+              
+              for (let j = 0; j < patchLines.length; j++) {
+                const line = patchLines[j];
+                
+                // Parse hunk header to get starting line number
+                if (line.startsWith('@@')) {
+                  const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+                  if (match) {
+                    lineNumber = parseInt(match[1], 10) - 1; // Convert to 0-based
+                  }
+                  continue;
+                }
+                
+                // Skip file headers
+                if (line.startsWith('---') || line.startsWith('+++')) continue;
+                
+                // Track line numbers for context and added lines
+                if (line.startsWith(' ') || line.startsWith('+')) {
+                  lineNumber++;
+                }
+                
+                // Find the first added line for position
+                if (line.startsWith('+') && !line.startsWith('+++') && position === null) {
+                  position = lineNumber;
+                }
+              }
+            }
+            if (position !== null) {
+              const reviewData = {
+                path: file.filename,
+                body: formattedBody,
+                position,
+              };
+              ress.push(reviewData);
+            } else {
+              log.debug(`No valid position found in patch for ${file.filename}, skipping comment.`);
+            }
           } else {
             log.debug(`No review comment generated for ${file.filename}`);
           }
