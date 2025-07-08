@@ -162,7 +162,7 @@ export const robot = (app: Probot) => {
           log.debug(`LGTM status for ${file.filename}: ${lgtmStatus}`);
           log.debug(`Type of lgtm: ${typeof lgtm}`);
           log.debug("================================================")
-          const formattedBody = lgtmStatus ? `> ## ${lgtmStatus}\n\n${reviewComment}` : reviewComment;
+          const formattedBody = lgtmStatus ? `> ### ${lgtmStatus}\n\n${reviewComment}` : reviewComment;
           
           const preview = formattedBody?.length > 150 ? `${formattedBody.slice(0, 150)}...` : formattedBody;
           log.debug(`Review comment for ${file.filename}: ${preview}`);

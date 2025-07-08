@@ -14,16 +14,46 @@ export class Chat {
   }
 
   private generatePrompt = (patch: string) => {
-    const userPrompt = `You are a code review assistant. Review the following code patch with a practical, objective approach.\n\nInstructions:\n- If the patch is functionally correct and has no significant bugs, security issues, or major problems, mark it as LGTM. Minor style or optimization suggestions can be included in LGTM reviews.\n- If you find any real bugs, security vulnerabilities, or significant architectural issues, do NOT mark as LGTM. Always provide a specific code suggestion for each issue, using single backticks for inline code or indentation for multi-line code (do NOT use triple backticks).\n- ALWAYS structure your review using sections (e.g., ## Issues Found, ## Suggestions, ## Good Practices) or bullet points. NEVER write plain paragraphs or chunks of text without structure.\n- Use sections only if there are actual points to mention. You may add other relevant sections if needed.\n- Do NOT include unnecessary sections, repeated information, general praise, or filler content.\n- If you suggest code changes, present them in a JSON-safe way (no triple backticks).\n- Keep the review concise and focused on actionable feedback.\n\nOutput format:\nReturn a valid JSON string with the following structure:\n{\n  "lgtm": true or false,\n  "review_comment": "Your review in markdown, using only JSON-safe code formatting (no triple backticks) and ALWAYS structured with sections or bullet points."\n}\n\nExample:\n{"lgtm": true, "review_comment": "## Review Summary\\n\\n- The patch is functionally correct\\n- No security issues found"}\n\nPatch to review:\n`;
-    
-    const jsonFormatRequirement = 'Please provide your feedback in the following JSON format with lgtm as a boolean and review_comment as a markdown string:\n' +
-'Example (lgtm depends on the code review and the review comment structure is flexible and can be adapted as needed):\n' +
-'{"lgtm": true, "review_comment": "The actual review comment in markdown format with sections when appropriate"}\n' +
-'Your response must be a valid JSON string with the above structure. Both "lgtm" and "review_comment" fields are required and must be present in your response. The value for review_comment must be a single, properly quoted Markdown string (not a JS object, not a list, not raw Markdown). Do not have ```json or ``` in your response. Do not return a JS object or a list. Only return a valid JSON string.';
+    const userPrompt = `Review this PR like a chill staff engineer. Focus on NEW changes only and think DRY.
 
-    return `${userPrompt}${jsonFormatRequirement}:
-    ${patch}
-    `;
+ONLY bring up things if they're actually important - you don't need to comment on every category or find something to say. Quality over quantity.
+
+PRIORITY ORDER:
+- Critical bugs, security issues, performance problems
+- Code quality: proper separation of concerns, clear naming, best practices
+- Missing tests for new functionality
+- Suggestions for cleaner patterns or code fixes (only if they meaningfully improve the code)
+
+Be constructive and EXTREMELY concise. Think "would a 10x engineer actually care about this?" If it's not blocking or genuinely helpful, skip it entirely. Respect separation of concerns.
+
+Stay chill: flag real issues, suggest improvements where they add value, but don't nitpick or over-engineer. Sometimes the best review is a LGTM.
+
+TOOLS AVAILABLE:
+- You MUST execute code snippets to test logic and verify if implementations actually work - USE THIS EXTENSIVELY for any non-trivial logic
+- You can search documentation and official resources for API usage, best practices, and implementation patterns
+
+**CRITICAL: When reviewing code with calculations, algorithms, or complex logic, ALWAYS use code execution to verify correctness. Don't just assume code works - test it with real examples.**
+
+Use these tools when you need to verify complex logic or check current best practices/documentation. If you do use them, you must mention it in your review comment with quote and how you used it.
+
+**When you find bugs or issues that need fixing, ALWAYS provide the corrected code snippet in your review comment to help the developer.**
+
+Output format:
+Return a valid JSON string with the following structure:
+{
+  "lgtm": true or false,
+  "review_comment": "Your review in markdown, using only JSON-safe code formatting (no triple backticks) and structured with sections or bullet points when needed. When providing fixes, include the corrected code using single backticks or code blocks."
+}
+
+Examples:
+{"lgtm": false, "review_comment": "## Issues Found\\n\\n- Fix potential null pointer in line 42: \`user?.name\`\\n\\n## Suggestions\\n\\n- Consider extracting validation logic to separate function"}
+{"lgtm": true, "review_comment": "Clean implementation with proper error handling and good separation of concerns. Nice work!"}
+{"lgtm": false, "review_comment": "## Issues Found\\n\\n- Logic error in median calculation for odd-length arrays\\n\\n > ### Used code execution to verify: tested with [1,3,5] and found incorrect averaging instead of returning middle element*\\n\\n## Suggestions\\n\\n- Fix line 15: change to \`return sorted_numbers[n // 2]\` for odd-length arrays ### Final Code\\n\\n\`\`\`python\\n<fixed code>\\n\`\`\`" }
+
+Patch to review:\\n
+`;
+    
+    return `${userPrompt} ${patch}`;
   };
 
   public codeReview = async (patch: string): Promise<string | { lgtm: boolean, review_comment: string }> => {
@@ -46,10 +76,15 @@ export class Chat {
         type: "json_object"
       },
     });
+     console.log('Raw JSON response:', JSON.stringify({
+      model: this.model,
+      usage: res.usage,
+      response: res
+    }, null, 2));
     if (res.choices.length) {
       try {
         let content = res.choices[0].message.content || "";
-        console.log('Raw response content:', content);
+
         // Remove wrapping triple backticks and optional language specifier
         content = content.trim();
         if (content.startsWith('```')) {
