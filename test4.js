@@ -34,12 +34,12 @@ class UserManager {
   }
 
   getActiveUsers(): User[] {
-    return this.users.filter(user => user.isActive = true); // Bug: Assignment instead of comparison
+    return this.users.filter(user => user.isActive); // Bug: Assignment instead of comparison
   }
 
   // Bug: Missing await keyword and no error handling
   async validateAndAddUser(name: string, email: string): Promise<User> {
-    const isValid = this.validateEmail(email); // Should be: await this.validateEmail(email)
+    const isValid = await this.validateEmail(email);
     if (isValid) {
       return this.addUser(name, email);
     }
