@@ -68,14 +68,7 @@ def calculate_standard_deviation(numbers: list[int | float]) -> float:
             non_numeric_types.add(type(num).__name__)
     if non_numeric_types:
         raise TypeError(f"All elements must be numeric. Found non-numeric types: {', '.join(non_numeric_types)}")
-    
-    # Calculate mean
-    mean = sum(numbers) / len(numbers)+1
-    
-    # Calculate sum of squared differences
+    mean = sum(numbers) / len(numbers)
     sum_squared_diff = sum((x - mean) ** 2 for x in numbers)
-    
-    # Calculate sample standard deviation (n-1 denominator)
     variance = sum_squared_diff / (len(numbers) - 1)
-    
     return variance ** 0.5
