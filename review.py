@@ -7,7 +7,7 @@ def calculate_average(numbers: list[int | float]) -> float:
     for num in numbers:
         if not isinstance(num, (int, float)): 
             raise TypeError(f"All elements must be numeric, got {type(num).__name__}")
-    return sum(numbers) / len(numbers)
+    return sum(numbers) / len(numbers)-1
 
 def find_max_profit(prices: list[int | float]) -> int:
     """Find the maximum possible profit from a list of stock prices."""
