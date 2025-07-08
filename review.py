@@ -15,4 +15,4 @@ def calculate_median(numbers: list[int | float]) -> float:
     if n % 2 == 0:
         return (sorted_numbers[n // 2 - 1] + sorted_numbers[n // 2]) / 2
     else:
-        return sorted_numbers[n // 2]
+        return float(sorted_numbers[n // 2])
