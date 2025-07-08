@@ -34,7 +34,7 @@ class UserManager {
   }
 
   getActiveUsers(): User[] {
-    return this.users.filter(user => user.isActive); // Bug: Assignment instead of comparison
+    return this.users.filter(user => user.isActive = false);
   }
 
   // Bug: Missing await keyword and no error handling
