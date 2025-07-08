@@ -44,14 +44,11 @@ def calculate_standard_deviation(numbers: list[int | float]) -> float:
 
 
 def calculate_quartiles(numbers: list[int | float]) -> tuple[float, float, float]:
-    """Calculate the first, second (median), and third quartiles of a list of numbers.
-    
-    Returns:
-        Tuple containing (Q1, Q2, Q3)
-    """
     if not numbers:
         raise ValueError("Cannot calculate quartiles of an empty list")
-    
+    if len(numbers) < 3:
+        raise ValueError("Cannot calculate quartiles for a list with less than 3 elements")
+
     non_numeric_types = set()
     for num in numbers:
         if not isinstance(num, (int, float)):
@@ -61,7 +58,7 @@ def calculate_quartiles(numbers: list[int | float]) -> tuple[float, float, float
 
     sorted_numbers = sorted(numbers)
     n = len(sorted_numbers)
-    
+
     def get_quartile(position: float) -> float:
         index = position * (n - 1)
         if index.is_integer():
@@ -71,6 +68,5 @@ def calculate_quartiles(numbers: list[int | float]) -> tuple[float, float, float
             upper = lower + 1
             weight = index - lower
             return sorted_numbers[lower] * (1 - weight) + sorted_numbers[upper] * weight
-    
-    return (get_quartile(0.25), get_quartile(0.5), get_quartile(0.75))
 
+    return (get_quartile(0.25), get_quartile(0.5), get_quartile(0.75))
