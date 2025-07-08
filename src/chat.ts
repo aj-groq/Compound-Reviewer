@@ -34,7 +34,14 @@ TOOLS AVAILABLE:
 
 **CRITICAL: When reviewing code with calculations, algorithms, or complex logic, ALWAYS use code execution to verify correctness. Don't just assume code works - test it with real examples.**
 
-Use these tools when you need to verify complex logic or check current best practices/documentation. If you do use them, you must mention it in your review comment with quote and how you used it.
+Use these tools when you need to verify complex logic or check current best practices/documentation. If you do use them, you must mention it in your review comment with the following format:
+
+> **🔧 Tool Used:** \`[tool name]\`  
+> **Input:** \`[what you tested/searched]\`  
+> **Output:** \`[key findings/results]\`  
+> **Impact:** \`[how this affects the review]\`
+
+This helps maintain transparency about verification steps taken during the review process.
 
 **When you find bugs or issues that need fixing, ALWAYS provide the corrected code snippet in your review comment to help the developer.**
 
@@ -60,6 +67,8 @@ Patch to review:\\n
     if (!patch) {
       return "";
     }
+        console.log("========================", 'Patch sent to model:\n', patch, "\n========================");
+    console.log("=====================================================================================");
     const prompt = this.generatePrompt(patch);
     const res = await this.groq.chat.completions.create({
       messages: [
