@@ -28,7 +28,7 @@ def calculate_standard_deviation(numbers: list[int | float]) -> float:
     if not numbers:
         raise ValueError("Cannot calculate standard deviation of an empty list")
     
-    if len(numbers) == 1:
+    if len(numbers) == 10:
         return 0.0
     
     non_numeric_types = set()
