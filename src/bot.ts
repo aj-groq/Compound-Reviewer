@@ -23,7 +23,7 @@ export const robot = (app: Probot) => {
         {
           owner: repo.owner,
           repo: repo.repo,
-          name: GROQ_API_KEY,
+          name: 'GROQ_API_KEY',
         }
       )) as any;
 
@@ -42,6 +42,155 @@ export const robot = (app: Probot) => {
       return null;
     }
   };
+
+  // Handle mentions in comments
+  app.on('issue_comment.created', async (context) => {
+    const comment = context.payload.comment;
+    const botName = 'compound-reviewer';
+    
+    log.debug('Received issue_comment.created event', {
+      commentId: comment.id,
+      commentBody: comment.body,
+      author: comment.user?.login,
+      issueNumber: context.payload.issue?.number,
+      isPullRequest: !!context.payload.issue?.pull_request
+    });
+    
+    // Check if the bot is mentioned at the start of the comment
+    const firstWord = comment.body.trim().split(/\s+/)[0];
+    
+    if (firstWord !== `@${botName}` && firstWord !== botName) {
+      log.debug('Bot not mentioned at start of comment, skipping');
+      return;
+    }
+
+    log.debug('Bot mentioned in comment');
+
+    // Only respond to PR comments
+    if (!context.payload.issue?.pull_request) {
+      log.debug('Comment is not on a pull request, skipping');
+      return;
+    }
+
+    log.debug('Comment is on a pull request, proceeding');
+
+    const repo = context.repo();
+    log.debug('Repository info', { owner: repo.owner, repo: repo.repo });
+
+    const chat = await loadChat(context);
+
+    if (!chat) {
+      log.info('Chat initialization failed for mention response');
+      return;
+    }
+
+    log.debug('Chat initialized successfully');
+    log.debug('Comment body:', comment.body);
+    log.debug('Bot name:', botName);
+    log.debug('Is pull request:', !!context.payload.issue?.pull_request);
+    log.debug('Issue number:', context.payload.issue?.number);
+    log.debug('Repository:', { owner: repo.owner, repo: repo.repo });
+    log.debug('Chat initialized successfully');
+
+    try {
+      // Get PR information
+      const prNumber = context.payload.issue.number;
+      log.debug('Getting PR information', { prNumber });
+
+      const pullRequest = await context.octokit.pulls.get({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: prNumber,
+      });
+
+      log.debug('PR information retrieved', {
+        title: pullRequest.data.title,
+        author: pullRequest.data.user?.login,
+        branch: pullRequest.data.head.ref,
+        baseBranch: pullRequest.data.base.ref
+      });
+
+      // Get PR diff for context
+      log.debug('Getting PR diff');
+      const prDiff = await context.octokit.pulls.get({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: prNumber,
+        mediaType: { format: 'diff' },
+      });
+
+      log.debug('PR diff retrieved', { diffLength: (prDiff.data as unknown as string).length });
+
+      // Get recent comments for conversation history
+      log.debug('Getting recent comments for conversation history');
+      const comments = await context.octokit.issues.listComments({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: prNumber,
+        per_page: 10,
+      });
+
+      log.debug('Comments retrieved', { commentCount: comments.data.length });
+
+      // Extract user query from comment (remove mention)
+      const userQuery = comment.body
+        .replace(new RegExp(`@${botName}`, 'gi'), '')
+        .replace(new RegExp(botName, 'gi'), '')
+        .trim();
+
+      log.debug('User query extracted', { userQuery });
+
+      // Build context for the AI
+      const prContext = {
+        title: pullRequest.data.title,
+        description: pullRequest.data.body || '',
+        author: pullRequest.data.user?.login || 'unknown',
+        branch: pullRequest.data.head.ref,
+        baseBranch: pullRequest.data.base.ref,
+        diff: prDiff.data,
+        conversationHistory: comments.data.slice(-5).map(c => ({
+          author: c.user?.login || 'unknown',
+          body: c.body,
+          createdAt: c.created_at,
+        })),
+      };
+
+      log.debug('PR context built', {
+        title: prContext.title,
+        author: prContext.author,
+        branch: prContext.branch,
+        baseBranch: prContext.baseBranch,
+        conversationHistoryLength: prContext.conversationHistory.length
+      });
+
+      // Generate response using the chat system
+      log.debug('Generating response using chat system');
+      const response = await chat.respondToMention(userQuery, prContext);
+
+      log.debug('Response generated', { responseLength: response.length });
+
+      // Post the response
+      log.debug('Posting response comment');
+      await context.octokit.issues.createComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: prNumber,
+        body: response,
+      });
+
+      log.info(`Responded to mention in PR #${prNumber}`);
+    } catch (error) {
+      log.error('Error handling mention:', error);
+      
+      // Post error response
+      await context.octokit.issues.createComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: context.payload.issue.number,
+        body: 'Sorry, I encountered an error while processing your request. Please try again later.',
+      });
+    }
+  });
 
   app.on(
     ['pull_request.opened', 'pull_request.synchronize', 'pull_request.reopened'],
@@ -83,7 +232,7 @@ export const robot = (app: Probot) => {
           head: commits[commits.length - 1].sha,
         });
 
-        changedFiles = files
+        changedFiles = files;
       }
 
       const ignoreList = (process.env.IGNORE || process.env.ignore || '')
@@ -98,11 +247,11 @@ export const robot = (app: Probot) => {
 
       changedFiles = changedFiles?.filter(
         (file) => {
-          const url = new URL(file.contents_url)
-          const pathname = decodeURIComponent(url.pathname)
+          const url = new URL(file.contents_url);
+          const pathname = decodeURIComponent(url.pathname);
           // if includePatterns is not empty, only include files that match the pattern
           if (includePatterns.length) {
-            return matchPatterns(includePatterns, pathname)
+            return matchPatterns(includePatterns, pathname);
           }
 
           if (ignoreList.includes(file.filename)) {
@@ -111,11 +260,11 @@ export const robot = (app: Probot) => {
 
           // if ignorePatterns is not empty, ignore files that match the pattern
           if (ignorePatterns.length) {
-            return !matchPatterns(ignorePatterns, pathname)
+            return !matchPatterns(ignorePatterns, pathname);
           }
 
-          return true
-      })
+          return true;
+      });
 
       if (!changedFiles?.length) {
         log.info('no change found');
@@ -124,7 +273,7 @@ export const robot = (app: Probot) => {
 
       console.time('gpt cost');
 
-      const ress = [];
+      const reviews = [];
 
       for (let i = 0; i < changedFiles.length; i++) {
         const file = changedFiles[i];
@@ -162,7 +311,7 @@ export const robot = (app: Probot) => {
           log.debug(`LGTM status for ${file.filename}: ${lgtmStatus}`);
           log.debug(`Type of lgtm: ${typeof lgtm}`);
           log.debug("================================================")
-          const formattedBody = lgtmStatus ? `> ### ${lgtmStatus}\n\n${reviewComment}` : reviewComment;
+          const formattedBody = `> ### ${lgtmStatus}\n\n${reviewComment}`;
           
           const preview = formattedBody?.length > 150 ? `${formattedBody.slice(0, 150)}...` : formattedBody;
           log.debug(`Review comment for ${file.filename}: ${preview}`);
@@ -206,7 +355,7 @@ export const robot = (app: Probot) => {
                 body: formattedBody,
                 position,
               };
-              ress.push(reviewData);
+              reviews.push(reviewData);
             } else {
               log.debug(`No valid position found in patch for ${file.filename}, skipping comment.`);
             }
@@ -222,10 +371,10 @@ export const robot = (app: Probot) => {
           repo: repo.repo,
           owner: repo.owner,
           pull_number: context.pullRequest().pull_number,
-          body: ress.length ? "Code review by Compound Reviewer" : "LGTM 👍",
+          body: reviews.length ? "Code review by Compound Reviewer" : "LGTM 👍",
           event: 'COMMENT',
           commit_id: commits[commits.length - 1].sha,
-          comments: ress,
+          comments: reviews,
         });
       } catch (e) {
         log.info(`Failed to create review`, e);

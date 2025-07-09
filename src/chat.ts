@@ -170,4 +170,66 @@ ${output}`;
       return reformatted;
     }
   };
+
+  public respondToMention = async (userQuery: string, prContext: any): Promise<string> => {
+    if (!userQuery) {
+      return "Hi! I'm Compound Reviewer. You can ask me questions about this PR or request specific code analysis.";
+    }
+
+    const conversationHistory = prContext.conversationHistory
+      .map((comment: any) => `**${comment.author}**: ${comment.body}`)
+      .join('\n\n');
+
+    console.log('\n\nConversation History:\n##########################\n\n', conversationHistory,
+      '\n\n##########################\n\n'
+    );
+
+    const prompt = `You are Compound Reviewer, a code review bot. A user has mentioned you in a PR comment with a question or request.
+
+**User Query:** ${userQuery}
+**PR Context:**
+- **Title:** ${prContext.title}
+- **Description:** ${prContext.description}
+- **Author:** ${prContext.author}
+- **Branch:** ${prContext.branch} → ${prContext.baseBranch}
+
+**Recent Conversation:**
+${conversationHistory}
+
+**Code Changes:**
+${prContext.diff}
+
+Based on the information provided above, respond directly to the user's query. You can:
+- Answer questions about the code changes
+- Provide code analysis or suggestions
+- Explain specific parts of the implementation
+- Suggest improvements or alternatives
+- Help with debugging issues
+
+Respond naturally and directly without meta-commentary. Keep your response concise, helpful, and focused on the user's specific question. Use markdown formatting for code examples when appropriate.`;
+
+    try {
+      const res = await this.groq.chat.completions.create({
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        model: this.model,
+        temperature: +(process.env.temperature || 0) || 0.7,
+        top_p: +(process.env.top_p || 0) || 1,
+        max_tokens: process.env.max_tokens ? +process.env.max_tokens : 1000,
+      });
+
+      if (res.choices.length) {
+        return res.choices[0].message.content || "I'm sorry, I couldn't generate a response. Please try again.";
+      }
+    } catch (error) {
+      console.error('Error in respondToMention:', error);
+      return "I encountered an error while processing your request. Please try again later.";
+    }
+
+    return "I'm sorry, I couldn't generate a response. Please try again.";
+  };
 }
