@@ -31,10 +31,8 @@ class TaskManager:
         timestamp = str(time.time())
         return hashlib.md5(f"{title}{timestamp}".encode()).hexdigest()[:8]
     
-    def create_task(self, title: str, description: str, priority: int = 3, 
-                   due_date: Optional[datetime] = None, tags: List[str] = None) -> Task:
-        """Create a new task"""
-        if not 1 <= priority <= 5:
+    def create_task(self, title: str, description: str, priority: int = 3, due_date: Optional[datetime] = None, tags: List[str] = None) -> Task:
+        if not (1 <= priority <= 5):
             raise ValueError("Priority must be between 1 and 5")
         
         task_id = self.generate_task_id(title)
