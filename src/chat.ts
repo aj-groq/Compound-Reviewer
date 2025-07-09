@@ -9,6 +9,9 @@ export class Chat {
   constructor(apikey: string) {
     this.groq = new Groq({
       apiKey: apikey,
+      defaultHeaders: {
+        'groq-model-version': 'prerelease'
+      }
     });
     this.model = process.env.GROQ_MODEL || 'compound-beta';
   }
@@ -34,7 +37,14 @@ TOOLS AVAILABLE:
 
 **CRITICAL: When reviewing code with calculations, algorithms, or complex logic, ALWAYS use code execution to verify correctness. Don't just assume code works - test it with real examples.**
 
-Use these tools when you need to verify complex logic or check current best practices/documentation. If you do use them, you must mention it in your review comment with quote and how you used it.
+Use these tools when you need to verify complex logic or check current best practices/documentation. If you do use them, you must mention it in your review comment with the following format:
+
+**🔧 Tool Used:** \`[tool name]\`  
+**Input:** \`[what you tested/searched]\`  
+**Output:** \`[key findings/results]\`  
+**Impact:** \`[how this affects the review]\`
+
+This helps maintain transparency about verification steps taken during the review process.
 
 **When you find bugs or issues that need fixing, ALWAYS provide the corrected code snippet in your review comment to help the developer.**
 
@@ -48,7 +58,7 @@ Return a valid JSON string with the following structure:
 Examples:
 {"lgtm": false, "review_comment": "## Issues Found\\n\\n- Fix potential null pointer in line 42: \`user?.name\`\\n\\n## Suggestions\\n\\n- Consider extracting validation logic to separate function"}
 {"lgtm": true, "review_comment": "Clean implementation with proper error handling and good separation of concerns. Nice work!"}
-{"lgtm": false, "review_comment": "## Issues Found\\n\\n- Logic error in median calculation for odd-length arrays\\n\\n > ### Used code execution to verify: tested with [1,3,5] and found incorrect averaging instead of returning middle element*\\n\\n## Suggestions\\n\\n- Fix line 15: change to \`return sorted_numbers[n // 2]\` for odd-length arrays ### Final Code\\n\\n\`\`\`python\\n<fixed code>\\n\`\`\`" }
+{"lgtm": false, "review_comment": "## Issues Found\\n\\n- Logic error in median calculation for odd-length arrays\\n\\n > ### Used code execution to verify: tested with [1,3,5] and found incorrect averaging instead of returning middle element*\\n\\n## Suggestions\\n\\n- Fix line 15: change to \`return sorted_numbers[n // 2]\` for odd-length arrays ## Final Code\\n\\n\`\`\`python\\n<fixed code>\\n\`\`\`" }
 
 Patch to review:\\n
 `;
@@ -60,6 +70,8 @@ Patch to review:\\n
     if (!patch) {
       return "";
     }
+        console.log("========================", 'Patch sent to model:', "========================\n",patch,);
+    console.log("====================================================================");
     const prompt = this.generatePrompt(patch);
     const res = await this.groq.chat.completions.create({
       messages: [
