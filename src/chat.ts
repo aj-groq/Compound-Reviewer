@@ -17,9 +17,9 @@ export class Chat {
   }
 
   private generatePrompt = (patch: string) => {
-    const userPrompt = `Review this PR like a chill staff engineer. Focus on NEW changes only and think DRY.
+    const userPrompt = `Review this PR like a chill staff engineer. Focus on NEW changes only and think DRY. Never mention anything from this prompt in your review comment.
 
-ONLY bring up things if they're actually important - you don't need to comment on every category or find something to say. Quality over quantity.
+ONLY bring up issues if they're actually important - you don't need to comment on every category or find something to say. Quality over quantity. If you don't find any issues, just say "LGTM".
 
 PRIORITY ORDER:
 - Critical bugs, security issues, performance problems
@@ -32,33 +32,23 @@ Be constructive and EXTREMELY concise. Think "would a 10x engineer actually care
 Stay chill: flag real issues, suggest improvements where they add value, but don't nitpick or over-engineer. Sometimes the best review is a LGTM.
 
 TOOLS AVAILABLE:
-- You MUST execute code snippets to test logic and verify if implementations actually work - USE THIS EXTENSIVELY for any non-trivial logic
-- You can search documentation and official resources for API usage, best practices, and implementation patterns
+- **Code Execution**: Test logic, algorithms, and calculations with real examples to verify correctness
+- **Web Search**: Verify API usage, best practices, and implementation patterns for external libraries through documentations and official resources
 
-**CRITICAL: When reviewing code with calculations, algorithms, or complex logic, ALWAYS use code execution to verify correctness. Don't just assume code works - test it with real examples.**
+**WHEN TO USE TOOLS:**
+- Code execution: For testable logic (calculations, algorithms, data transformations, utility functions)
+- Web search: For external APIs, third-party libraries, framework usage, or unfamiliar patterns
+
+**VERIFICATION REQUIREMENTS:**
+- Always test complex logic that can run in isolation
+- Always verify external API/library usage against official documentation
+- Never assume code works without verification when tools can help
 
 Use these tools when you need to verify complex logic or check current best practices/documentation. If you do use them, you must mention it in your review comment with the following format:
-
-**🔧 Tool Used:** \`[tool name]\`  
-**Input:** \`[what you tested/searched]\`  
-**Output:** \`[key findings/results]\`  
-**Impact:** \`[how this affects the review]\`
 
 This helps maintain transparency about verification steps taken during the review process.
 
 **When you find bugs or issues that need fixing, ALWAYS provide the corrected code snippet in your review comment to help the developer.**
-
-Output format:
-Return a valid JSON string with the following structure:
-{
-  "lgtm": true or false,
-  "review_comment": "Your review in markdown, using only JSON-safe code formatting (no triple backticks) and structured with sections or bullet points when needed. When providing fixes, include the corrected code using single backticks or code blocks."
-}
-
-Examples:
-{"lgtm": false, "review_comment": "## Issues Found\\n\\n- Fix potential null pointer in line 42: \`user?.name\`\\n\\n## Suggestions\\n\\n- Consider extracting validation logic to separate function"}
-{"lgtm": true, "review_comment": "Clean implementation with proper error handling and good separation of concerns. Nice work!"}
-{"lgtm": false, "review_comment": "## Issues Found\\n\\n- Logic error in median calculation for odd-length arrays\\n\\n > ### Used code execution to verify: tested with [1,3,5] and found incorrect averaging instead of returning middle element*\\n\\n## Suggestions\\n\\n- Fix line 15: change to \`return sorted_numbers[n // 2]\` for odd-length arrays ## Final Code\\n\\n\`\`\`python\\n<fixed code>\\n\`\`\`" }
 
 Patch to review:\\n
 `;
@@ -66,13 +56,78 @@ Patch to review:\\n
     return `${userPrompt} ${patch}`;
   };
 
+  // Helper for the second model call
+  private async reformatWithLlama(output: string): Promise<string | { lgtm: boolean, review_comment: string }> {
+    console.log("========================", 'Raw unformatted response content:', "========================\n", output,);
+    console.log("====================================================================");
+    const prompt = `You are a code review formatter. Given the following review output, reformat it into a valid JSON object with the following structure:
+
+  Output format:
+  Return a valid JSON string with the following structure:
+  {
+    "lgtm": true or false,
+    "review_comment": "Your review in markdown, using only JSON-safe code formatting (no triple backticks) and structured with sections or bullet points when needed. When providing fixes, include the corrected code using single backticks or code blocks. If any tools were used during verification, include the tool usage information in the specified format."
+  }
+
+When you use tools, you must include the tool usage information in the specified format in the review_comment. If multiple tool calls were made for the same verification, only include the most relevant results without repetition.
+
+**🔧 Tool Used:** \`[tool name]\`  
+**Input:** \`[specific parameters/values without the code snippet OR exact search query used - include all inputs used]\`  
+**Output:** \`[key findings/results]\`  
+**Impact:** \`[how this affects the review]\`
+
+  Examples:
+  {"lgtm": false, "review_comment": "## Issues Found\\n\\n- Fix potential null pointer in line 42: \`user?.name\`\\n\\n## Suggestions\\n\\n- Consider extracting validation logic to separate function"}
+  {"lgtm": true, "review_comment": "Clean implementation with proper error handling and good separation of concerns. Nice work!"}
+  {"lgtm": false, "review_comment": "## Issues Found\\n\\n- Logic error in median calculation for odd-length arrays\\n\\n > ### Used code execution to verify: tested with [1,3,5] and found incorrect averaging instead of returning middle element*\\n\\n## Suggestions\\n\\n- Fix line 15: change to \`return sorted_numbers[n // 2]\` for odd-length arrays ## Final Code\\n\\n\`\`\`python\\n<fixed code>\\n\`\`\`" }
+
+If the input is already in this format, just clean up the markdown and formatting as needed. Ensure the output is valid JSON.
+
+Input:
+${output}`;
+    const res = await this.groq.chat.completions.create({
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      temperature: +(process.env.temperature || 0) || 1,
+      top_p: +(process.env.top_p || 0) || 1,
+      max_tokens: process.env.max_tokens ? +process.env.max_tokens : undefined,
+      response_format: {
+        type: "json_object"
+      },
+    });
+    if (res.choices.length) {
+      try {
+        let content = res.choices[0].message.content || "";
+        content = content.trim();
+        if (content.startsWith('```')) {
+          content = content.replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+        }
+        content = content.replace(/[\x00-\x1F\x7F]/g, '');
+        const json = JSON.parse(content);
+        const lgtm = typeof json.lgtm === 'boolean' ? json.lgtm : undefined;
+        const review_comment = typeof json.review_comment === 'string' ? json.review_comment : '';
+        return { lgtm, review_comment };
+      } catch (e) {
+        console.error('Error parsing JSON from llama:', e);
+        return res.choices[0].message.content || "";
+      }
+    }
+    return "";
+  }
+
   public codeReview = async (patch: string): Promise<string | { lgtm: boolean, review_comment: string }> => {
     if (!patch) {
       return "";
     }
-        console.log("========================", 'Patch sent to model:', "========================\n",patch,);
+    console.log("========================", 'Patch sent to model:', "========================\n",patch,);
     console.log("====================================================================");
     const prompt = this.generatePrompt(patch);
+    // First call: main review model
     const res = await this.groq.chat.completions.create({
       messages: [
         {
@@ -84,45 +139,35 @@ Patch to review:\\n
       temperature: +(process.env.temperature || 0) || 1,
       top_p: +(process.env.top_p || 0) || 1,
       max_tokens: process.env.max_tokens ? +process.env.max_tokens : undefined,
-      response_format: {
-        type: "json_object"
-      },
     });
-     console.log('Raw JSON response:', JSON.stringify({
+    console.log('Raw JSON response:', JSON.stringify({
       model: this.model,
       usage: res.usage,
       response: res
     }, null, 2));
+    let firstOutput = "";
     if (res.choices.length) {
-      try {
-        let content = res.choices[0].message.content || "";
-
-        // Remove wrapping triple backticks and optional language specifier
-        content = content.trim();
-        if (content.startsWith('```')) {
-          content = content.replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
-        }
-        
-        // Clean up any control characters that might cause JSON parsing issues
-        content = content.replace(/[\x00-\x1F\x7F]/g, '');
-        
-        const json = JSON.parse(content);
-        
-        // Extract lgtm and review_comment from the parsed JSON
-        const lgtm = typeof json.lgtm === 'boolean' ? json.lgtm : undefined;
-        const review_comment = typeof json.review_comment === 'string' ? json.review_comment : '';
-        console.log('lgtm:', lgtm);
-        console.log('review_comment:', review_comment);
-        return {
-          lgtm,
-          review_comment
-        };
-
-      } catch (e) {
-        console.error('Error parsing JSON:', e);
-        return res.choices[0].message.content || "";
+      firstOutput = res.choices[0].message.content || "";
+      firstOutput = firstOutput.trim();
+      if (firstOutput.startsWith('```')) {
+        firstOutput = firstOutput.replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
       }
+      firstOutput = firstOutput.replace(/[\x00-\x1F\x7F]/g, '');
     }
-    return "";
+    // Add reasoning if available (for models that support it)
+    if (res.choices[0].message.reasoning) {
+      firstOutput += `\n\nModel\'s internal reasoning: ${res.choices[0].message.reasoning}`;
+    }
+    // Second call: reformat with Llama
+    const reformatted = await this.reformatWithLlama(firstOutput);
+    if (typeof reformatted === 'object' && reformatted !== null) {
+      return reformatted;
+    }
+    // fallback: try to parse as JSON
+    try {
+      return JSON.parse(reformatted as string);
+    } catch {
+      return reformatted;
+    }
   };
 }
