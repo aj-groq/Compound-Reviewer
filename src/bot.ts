@@ -236,8 +236,8 @@ export const robot = (app: Probot) => {
       }
 
       const ignoreList = (process.env.IGNORE || process.env.ignore || '')
-          .split('\n')
-          .filter((v) => v !== '');
+        .split('\n')
+        .filter((v) => v !== '');
       const ignorePatterns = (process.env.IGNORE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
       const includePatterns = (process.env.INCLUDE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
 
@@ -264,7 +264,7 @@ export const robot = (app: Probot) => {
           }
 
           return true;
-      });
+        });
 
       if (!changedFiles?.length) {
         log.info('no change found');
@@ -486,30 +486,18 @@ export const robot = (app: Probot) => {
     });
   });
 
-  app.on('reaction.created', async (context) => {
-    const reaction = context.payload.reaction;
-    const user = context.payload.sender;
-    const comment = context.payload.comment || context.payload.issue || context.payload.pull_request;
-
-    // Example: Only respond to reactions on comments made by the bot
-    if (comment && comment.user && comment.user.login === 'compound-reviewer[bot]') {
-      // Do something, e.g., post a thank you comment, log, etc.
-      console.log(`User ${user.login} reacted with ${reaction.content} to a bot comment!`);
-    }
-  });
-};
-
-const matchPatterns = (patterns: string[], path: string) => {
-  return patterns.some((pattern) => {
-    try {
-      return minimatch(path, pattern.startsWith('/') ? "**" + pattern : pattern.startsWith("**") ? pattern : "**/" + pattern);
-    } catch {
-      // if the pattern is not a valid glob pattern, try to match it as a regular expression
+  const matchPatterns = (patterns: string[], path: string) => {
+    return patterns.some((pattern) => {
       try {
-        return new RegExp(pattern).test(path);
-      } catch (e) {
-        return false;
+        return minimatch(path, pattern.startsWith('/') ? "**" + pattern : pattern.startsWith("**") ? pattern : "**/" + pattern);
+      } catch {
+        // if the pattern is not a valid glob pattern, try to match it as a regular expression
+        try {
+          return new RegExp(pattern).test(path);
+        } catch (e) {
+          return false;
+        }
       }
-    }
-  })
+    })
+  }
 }
