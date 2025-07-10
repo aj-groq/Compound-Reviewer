@@ -56,7 +56,11 @@ async function browseAndAnalyze(sandbox: any) {
   console.time('Get preview link')
   const previewLink = await sandbox.getPreviewLink(6080)
   console.log('Computer use preview link:', previewLink.url)
-  await open(previewLink.url);
+  try {
+    await open(previewLink.url);
+  } catch (error) {
+    console.error('Failed to open preview link:', error);
+  }
   console.timeEnd('Get preview link')
 
   // Open browser (Super_L, type 'firefox', Return)
