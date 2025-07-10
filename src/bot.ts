@@ -271,7 +271,7 @@ export const robot = (app: Probot) => {
         return 'no change';
       }
 
-      console.time('gpt cost');
+      console.time('total review time');
 
       const reviews = [];
 
@@ -380,7 +380,7 @@ export const robot = (app: Probot) => {
         log.info(`Failed to create review`, e);
       }
 
-      console.timeEnd('gpt cost');
+      console.timeEnd('total review time');
       log.info(
         'successfully reviewed',
         context.payload.pull_request.html_url
@@ -389,6 +389,114 @@ export const robot = (app: Probot) => {
       return 'success';
     }
   );
+
+  app.on('pull_request_review_comment.created', async (context) => {
+    const comment = context.payload.comment;
+    const botName = 'compound-reviewer';
+
+    // Only respond if bot is mentioned at the start
+    const firstWord = comment.body.trim().split(/\s+/)[0];
+    if (firstWord !== `@${botName}` && firstWord !== botName) {
+      return;
+    }
+
+    // Get PR info
+    const prNumber = context.payload.pull_request.number;
+    const repo = context.repo();
+    const chat = await loadChat(context);
+    if (!chat) return;
+
+    // Get PR details
+    const pullRequest = await context.octokit.pulls.get({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: prNumber,
+    });
+
+    // Get PR diff
+    const prDiff = await context.octokit.pulls.get({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: prNumber,
+      mediaType: { format: 'diff' },
+    });
+
+    // Get recent review comments for context
+    const reviewComments = await context.octokit.pulls.listReviewComments({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: prNumber,
+      per_page: 10,
+    });
+
+    // Get the parent comment (the one being replied to)
+    let parentComment = null;
+    if (comment.in_reply_to_id) {
+      parentComment = await context.octokit.pulls.getReviewComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        comment_id: comment.in_reply_to_id,
+      });
+    }
+
+    // Extract user query
+    const userQuery = comment.body
+      .replace(new RegExp(`@${botName}`, 'gi'), '')
+      .replace(new RegExp(botName, 'gi'), '')
+      .trim();
+
+    // Build context for the AI
+    const prContext = {
+      title: pullRequest.data.title,
+      description: pullRequest.data.body || '',
+      author: pullRequest.data.user?.login || 'unknown',
+      branch: pullRequest.data.head.ref,
+      baseBranch: pullRequest.data.base.ref,
+      diff: prDiff.data,
+      conversationHistory: reviewComments.data.slice(-5).map(c => ({
+        author: c.user?.login || 'unknown',
+        body: c.body,
+        createdAt: c.created_at,
+      })),
+      parentReviewComment: parentComment ? {
+        author: parentComment.data.user?.login || 'unknown',
+        body: parentComment.data.body,
+        createdAt: parentComment.data.created_at,
+      } : null,
+    };
+
+    // Generate response using the chat system
+    const response = await chat.respondToMention(userQuery, prContext);
+
+    // Quote the original review comment
+    const quoted = comment.body
+      .split('\n')
+      .map(line => `> ${line}`)
+      .join('\n');
+
+    // Compose the reply
+    const replyBody = `${quoted}\n\n---\n${response}`;
+
+    // Post the response as a new top-level PR comment
+    await context.octokit.issues.createComment({
+      owner: repo.owner,
+      repo: repo.repo,
+      issue_number: prNumber,
+      body: replyBody,
+    });
+  });
+
+  app.on('reaction.created', async (context) => {
+    const reaction = context.payload.reaction;
+    const user = context.payload.sender;
+    const comment = context.payload.comment || context.payload.issue || context.payload.pull_request;
+
+    // Example: Only respond to reactions on comments made by the bot
+    if (comment && comment.user && comment.user.login === 'compound-reviewer[bot]') {
+      // Do something, e.g., post a thank you comment, log, etc.
+      console.log(`User ${user.login} reacted with ${reaction.content} to a bot comment!`);
+    }
+  });
 };
 
 const matchPatterns = (patterns: string[], path: string) => {

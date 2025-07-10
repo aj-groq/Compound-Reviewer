@@ -71,10 +71,10 @@ Patch to review:\\n
 
 When you use tools, you must include the tool usage information in the specified format in the review_comment. If multiple tool calls were made for the same verification, only include the most relevant results without repetition.
 
-**🔧 Tool Used:** \`[tool name]\`  
-**Input:** \`[specific parameters/values without the code snippet OR exact search query used - include all inputs used]\`  
-**Output:** \`[key findings/results]\`  
-**Impact:** \`[how this affects the review]\`
+> **🔧 Tool Used:** \`[tool name]\`  
+> **➡️ Input:** \`[specific parameters/values without the code snippet OR exact search query used - include all inputs used]\`  
+> **⬅️ Output:** \`[key findings/results]\`  
+> **🎯 Impact:** \`[how this affects the review]\`
 
   Examples:
   {"lgtm": false, "review_comment": "## Issues Found\\n\\n- Fix potential null pointer in line 42: \`user?.name\`\\n\\n## Suggestions\\n\\n- Consider extracting validation logic to separate function"}
