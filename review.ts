@@ -83,10 +83,6 @@ async function browseAndAnalyze(sandbox: any) {
 
   // Wait for browser to load
   await new Promise(resolve => setTimeout(resolve, 3000))
-
-  // --- Apple.com ---
-  await navigateAndAnalyze(sandbox, 'https://www.apple.com', 'Apple')
-
   // --- Samsung.com ---
   await navigateAndAnalyze(sandbox, 'https://www.samsung.com', 'Samsung')
 }
