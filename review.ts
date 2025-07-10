@@ -1,7 +1,8 @@
 import { Daytona } from '@daytonaio/sdk'
 import 'dotenv/config'
 import { Groq } from 'groq-sdk'
-import { exec } from 'child_process'
+import open from 'open';
+
 
 const DAYTONA_API_KEY = process.env.DAYTONA_API_KEY
 const DAYTONA_API_URL = process.env.DAYTONA_API_URL
@@ -55,14 +56,7 @@ async function browseAndAnalyze(sandbox: any) {
   console.time('Get preview link')
   const previewLink = await sandbox.getPreviewLink(6080)
   console.log('Computer use preview link:', previewLink.url)
-  // Open the preview link locally
-  exec(`open "${previewLink.url}"`, (error: any) => {
-    if (error) {
-      console.error('Error opening preview link:', error)
-    } else {
-      console.log('Preview link opened locally')
-    }
-  })
+  await open(previewLink.url);
   console.timeEnd('Get preview link')
 
   // Open browser (Super_L, type 'firefox', Return)
