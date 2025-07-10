@@ -2,6 +2,7 @@ import { Daytona } from '@daytonaio/sdk'
 import 'dotenv/config'
 import { Groq } from 'groq-sdk'
 import open from 'open';
+import { browseAndAnalyze } from './sandboxUtils.js'
 
 
 const DAYTONA_API_KEY = process.env.DAYTONA_API_KEY
@@ -43,102 +44,6 @@ async function main() {
   }
   
   console.timeEnd('Total execution time')
-}
-
-async function browseAndAnalyze(sandbox: any) {
-  // Start VNC/computer use
-  console.time('Computer use start')
-  const startResult = await sandbox.computerUse.start()
-  console.log('Computer use start result:', startResult)
-  console.timeEnd('Computer use start')
-  // Get and print computer use status
-
-  console.time('Get preview link')
-  const previewLink = await sandbox.getPreviewLink(6080)
-  console.log('Computer use preview link:', previewLink.url)
-  try {
-    await open(previewLink.url);
-  } catch (error) {
-    console.error('Failed to open preview link:', error);
-  }
-  console.timeEnd('Get preview link')
-
-  // Open browser (Super_L, type 'firefox', Return)
-  console.time('Open browser')
-  await sandbox.computerUse.keyboard.press('Super_L')
-  await new Promise(resolve => setTimeout(resolve, 500))
-  // Take screenshot after opening launcher
-  console.time('Launcher screenshot')
-  const launcherResp = await sandbox.computerUse.screenshot.takeFullScreen(true)
-  console.timeEnd('Launcher screenshot')
-
-  // Analyze launcher with Groq
-  console.time('Launcher - Analyze with Groq')
-  await analyzeImageWithGroq(launcherResp.screenshot, 'Launcher')
-  console.timeEnd('Launcher - Analyze with Groq')
-  await sandbox.computerUse.keyboard.type('firefox')
-  await new Promise(resolve => setTimeout(resolve, 500))
-  await sandbox.computerUse.keyboard.press('Return')
-  console.timeEnd('Open browser')
-
-  // Wait for browser to load
-  await new Promise(resolve => setTimeout(resolve, 3000))
-  // --- Samsung.com ---
-  await navigateAndAnalyze(sandbox, 'https://www.samsung.com', 'Samsung')
-}
-
-async function navigateAndAnalyze(sandbox: any, url: string, label: string) {
-  console.time(`${label} - Navigate`)
-
-  await sandbox.computerUse.keyboard.hotkey('ctrl+l')
-  await new Promise(resolve => setTimeout(resolve, 500))
-  await sandbox.computerUse.keyboard.type(url)
-  await new Promise(resolve => setTimeout(resolve, 500))
-  await sandbox.computerUse.keyboard.press('Return')
-  console.timeEnd(`${label} - Navigate`)
-
-  // Wait for page to load
-  await new Promise(resolve => setTimeout(resolve, 4000))
-
-  // Screenshot
-  console.time(`${label} - Screenshot`)
-  const resp = await sandbox.computerUse.screenshot.takeFullScreen(true)
-  console.timeEnd(`${label} - Screenshot`)
-
-  // Analyze with Groq
-  console.time(`${label} - Analyze with Groq`)
-  await analyzeImageWithGroq(resp.screenshot, label)
-  console.timeEnd(`${label} - Analyze with Groq`)
-}
-
-async function analyzeImageWithGroq(base64Data: string, label: string) {
-  const dataUrl = `data:image/png;base64,${base64Data}`
-  const chatCompletion = await groq.chat.completions.create({
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-          {
-            "type": "text",
-            "text": `Describe the user interface in this image. This is a screenshot of the ${label} homepage.`
-          },
-          {
-            "type": "image_url",
-            "image_url": {
-              "url": dataUrl
-            }
-          }
-        ]
-      }
-    ],
-    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "temperature": 1,
-    "max_completion_tokens": 1024,
-    "top_p": 1,
-    "stream": false,
-    "stop": null
-  })
-  console.log(`Groq response for ${label}:`, chatCompletion.choices[0].message.content)
 }
 
 main().catch(console.error)
