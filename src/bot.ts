@@ -1,75 +1,178 @@
-import { Context, Probot } from 'probot';
-import { minimatch } from 'minimatch'
+import { Probot } from 'probot';
+import { minimatch } from 'minimatch';
 
 import { Chat } from './chat.js';
 import log from 'loglevel';
 
+// Type interfaces - using any for simplicity to avoid complex Probot type issues
+
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const MAX_PATCH_COUNT = process.env.MAX_PATCH_LENGTH
-  ? +process.env.MAX_PATCH_LENGTH
-  : Infinity;
+    ? +process.env.MAX_PATCH_LENGTH
+    : Infinity;
 
-export const robot = (app: Probot) => {
-  const loadChat = async (context: Context) => {
+// Utility functions
+const loadChat = async (context: any): Promise<Chat | null> => {
     if (GROQ_API_KEY) {
-      return new Chat(GROQ_API_KEY);
+        return new Chat(GROQ_API_KEY);
     }
 
     const repo = context.repo();
 
     try {
-      const { data } = (await context.octokit.request(
-        'GET /repos/{owner}/{repo}/actions/variables/{name}',
-        {
-          owner: repo.owner,
-          repo: repo.repo,
-          name: 'GROQ_API_KEY',
+        const { data } = (await context.octokit.request(
+            'GET /repos/{owner}/{repo}/actions/variables/{name}',
+            {
+                owner: repo.owner,
+                repo: repo.repo,
+                name: 'GROQ_API_KEY',
+            }
+        )) as any;
+
+        if (!data?.value) {
+            return null;
         }
-      )) as any;
 
-      if (!data?.value) {
-        return null;
-      }
-
-      return new Chat(data.value);
+        return new Chat(data.value);
     } catch {
-      await context.octokit.issues.createComment({
-        repo: repo.repo,
-        owner: repo.owner,
-        issue_number: context.pullRequest().pull_number,
-        body: `Seems you are using me but didn't get GROQ_API_KEY set in Variables/Secrets for this repo.`,
-      });
-      return null;
+        await context.octokit.issues.createComment({
+            repo: repo.repo,
+            owner: repo.owner,
+            issue_number: context.pullRequest().pull_number,
+            body: `Seems you are using me but didn't get GROQ_API_KEY set in Variables/Secrets for this repo.`,
+        });
+        return null;
     }
-  };
+};
 
-  // Handle mentions in comments
-  app.on('issue_comment.created', async (context) => {
+const matchPatterns = (patterns: string[], path: string): boolean => {
+    return patterns.some((pattern) => {
+        try {
+            return minimatch(path, pattern.startsWith('/') ? "**" + pattern : pattern.startsWith("**") ? pattern : "**/" + pattern);
+        } catch {
+            // if the pattern is not a valid glob pattern, try to match it as a regular expression
+            try {
+                return new RegExp(pattern).test(path);
+            } catch (e) {
+                return false;
+            }
+        }
+    });
+};
+
+const isBotMentioned = (body: string, botName: string): boolean => {
+    const firstWord = body.trim().split(/\s+/)[0];
+    return firstWord === `@${botName}` || firstWord === botName;
+};
+
+const extractUserQuery = (body: string, botName: string): string => {
+    return body
+        .replace(new RegExp(`@${botName}`, 'gi'), '')
+        .replace(new RegExp(botName, 'gi'), '')
+        .trim();
+};
+
+const buildPRContext = (pullRequest: any, prDiff: any, conversationHistory: any[], parentComment?: any) => {
+    return {
+        title: pullRequest.data.title,
+        description: pullRequest.data.body || '',
+        author: pullRequest.data.user?.login || 'unknown',
+        branch: pullRequest.data.head.ref,
+        baseBranch: pullRequest.data.base.ref,
+        diff: prDiff.data,
+        conversationHistory: conversationHistory.slice(-5).map(c => ({
+            author: c.user?.login || 'unknown',
+            body: c.body,
+            createdAt: c.created_at,
+        })),
+        parentReviewComment: parentComment ? {
+            author: parentComment.data.user?.login || 'unknown',
+            body: parentComment.data.body,
+            createdAt: parentComment.data.created_at,
+        } : null,
+    };
+};
+
+const filterChangedFiles = (changedFiles: any[]) => {
+    const ignoreList = (process.env.IGNORE || process.env.ignore || '')
+        .split('\n')
+        .filter((v) => v !== '');
+    const ignorePatterns = (process.env.IGNORE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
+    const includePatterns = (process.env.INCLUDE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
+
+    return changedFiles?.filter((file) => {
+        const url = new URL(file.contents_url);
+        const pathname = decodeURIComponent(url.pathname);
+
+        // if includePatterns is not empty, only include files that match the pattern
+        if (includePatterns.length) {
+            return matchPatterns(includePatterns, pathname);
+        }
+
+        if (ignoreList.includes(file.filename)) {
+            return false;
+        }
+
+        // if ignorePatterns is not empty, ignore files that match the pattern
+        if (ignorePatterns.length) {
+            return !matchPatterns(ignorePatterns, pathname);
+        }
+
+        return true;
+    });
+};
+
+
+
+const formatReviewComment = (lgtm: boolean, reviewComment: string): string => {
+    // Fix Markdown formatting: replace literal '\\n' with '\n'
+    if (typeof reviewComment === 'string') {
+        reviewComment = reviewComment.replace(/\\n/g, '\n');
+        // If it's a single line with multiple '*', insert '\n' before each '*' (except the first one)
+        if (!reviewComment.includes('\n') && (reviewComment.match(/\*/g) || []).length > 1) {
+            reviewComment = reviewComment.replace(/\s*\*/g, '\n*').replace(/^\n/, '');
+        }
+    }
+
+    const lgtmStatus = lgtm ? '✅ LGTM' : '❌ Needs Changes';
+    return `> ### ${lgtmStatus}\n\n${reviewComment}`;
+};
+
+const postErrorComment = async (context: any, issueNumber: number, message: string) => {
+    const repo = context.repo();
+    await context.octokit.issues.createComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: issueNumber,
+        body: message,
+    });
+};
+
+// Event handlers
+const handleIssueComment = async (context: any) => {
     const comment = context.payload.comment;
     const botName = 'compound-reviewer';
-    
+
     log.debug('Received issue_comment.created event', {
-      commentId: comment.id,
-      commentBody: comment.body,
-      author: comment.user?.login,
-      issueNumber: context.payload.issue?.number,
-      isPullRequest: !!context.payload.issue?.pull_request
+        commentId: comment.id,
+        commentBody: comment.body,
+        author: comment.user?.login,
+        issueNumber: context.payload.issue?.number,
+        isPullRequest: !!context.payload.issue?.pull_request
     });
-    
+
     // Check if the bot is mentioned at the start of the comment
-    const firstWord = comment.body.trim().split(/\s+/)[0];
-    
-    if (firstWord !== `@${botName}` && firstWord !== botName) {
-      log.debug('Bot not mentioned at start of comment, skipping');
-      return;
+    if (!isBotMentioned(comment.body, botName)) {
+        log.debug('Bot not mentioned at start of comment, skipping');
+        return;
     }
 
     log.debug('Bot mentioned in comment');
 
     // Only respond to PR comments
     if (!context.payload.issue?.pull_request) {
-      log.debug('Comment is not on a pull request, skipping');
-      return;
+        log.debug('Comment is not on a pull request, skipping');
+        return;
     }
 
     log.debug('Comment is on a pull request, proceeding');
@@ -80,324 +183,348 @@ export const robot = (app: Probot) => {
     const chat = await loadChat(context);
 
     if (!chat) {
-      log.info('Chat initialization failed for mention response');
-      return;
+        log.info('Chat initialization failed for mention response');
+        return;
     }
 
-    log.debug('Chat initialized successfully');
-    log.debug('Comment body:', comment.body);
-    log.debug('Bot name:', botName);
-    log.debug('Is pull request:', !!context.payload.issue?.pull_request);
-    log.debug('Issue number:', context.payload.issue?.number);
-    log.debug('Repository:', { owner: repo.owner, repo: repo.repo });
     log.debug('Chat initialized successfully');
 
     try {
-      // Get PR information
-      const prNumber = context.payload.issue.number;
-      log.debug('Getting PR information', { prNumber });
+        // Get PR information
+        const prNumber = context.payload.issue.number;
+        log.debug('Getting PR information', { prNumber });
 
-      const pullRequest = await context.octokit.pulls.get({
-        owner: repo.owner,
-        repo: repo.repo,
-        pull_number: prNumber,
-      });
+        const pullRequest = await context.octokit.pulls.get({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: prNumber,
+        });
 
-      log.debug('PR information retrieved', {
-        title: pullRequest.data.title,
-        author: pullRequest.data.user?.login,
-        branch: pullRequest.data.head.ref,
-        baseBranch: pullRequest.data.base.ref
-      });
+        log.debug('PR information retrieved', {
+            title: pullRequest.data.title,
+            author: pullRequest.data.user?.login,
+            branch: pullRequest.data.head.ref,
+            baseBranch: pullRequest.data.base.ref
+        });
 
-      // Get PR diff for context
-      log.debug('Getting PR diff');
-      const prDiff = await context.octokit.pulls.get({
-        owner: repo.owner,
-        repo: repo.repo,
-        pull_number: prNumber,
-        mediaType: { format: 'diff' },
-      });
+        // Get PR diff for context
+        log.debug('Getting PR diff');
+        const prDiff = await context.octokit.pulls.get({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: prNumber,
+            mediaType: { format: 'diff' },
+        });
 
-      log.debug('PR diff retrieved', { diffLength: (prDiff.data as unknown as string).length });
+        log.debug('PR diff retrieved', { diffLength: (prDiff.data as unknown as string).length });
 
-      // Get recent comments for conversation history
-      log.debug('Getting recent comments for conversation history');
-      const comments = await context.octokit.issues.listComments({
-        owner: repo.owner,
-        repo: repo.repo,
-        issue_number: prNumber,
-        per_page: 10,
-      });
+        // Get recent comments for conversation history
+        log.debug('Getting recent comments for conversation history');
+        const comments = await context.octokit.issues.listComments({
+            owner: repo.owner,
+            repo: repo.repo,
+            issue_number: prNumber,
+            per_page: 10,
+        });
 
-      log.debug('Comments retrieved', { commentCount: comments.data.length });
+        log.debug('Comments retrieved', { commentCount: comments.data.length });
 
-      // Extract user query from comment (remove mention)
-      const userQuery = comment.body
-        .replace(new RegExp(`@${botName}`, 'gi'), '')
-        .replace(new RegExp(botName, 'gi'), '')
-        .trim();
+        // Extract user query from comment (remove mention)
+        const userQuery = extractUserQuery(comment.body, botName);
+        log.debug('User query extracted', { userQuery });
 
-      log.debug('User query extracted', { userQuery });
+        // Build context for the AI
+        const prContext = buildPRContext(pullRequest, prDiff, comments.data);
 
-      // Build context for the AI
-      const prContext = {
-        title: pullRequest.data.title,
-        description: pullRequest.data.body || '',
-        author: pullRequest.data.user?.login || 'unknown',
-        branch: pullRequest.data.head.ref,
-        baseBranch: pullRequest.data.base.ref,
-        diff: prDiff.data,
-        conversationHistory: comments.data.slice(-5).map(c => ({
-          author: c.user?.login || 'unknown',
-          body: c.body,
-          createdAt: c.created_at,
-        })),
-      };
+        log.debug('PR context built', {
+            title: prContext.title,
+            author: prContext.author,
+            branch: prContext.branch,
+            baseBranch: prContext.baseBranch,
+            conversationHistoryLength: prContext.conversationHistory.length
+        });
 
-      log.debug('PR context built', {
-        title: prContext.title,
-        author: prContext.author,
-        branch: prContext.branch,
-        baseBranch: prContext.baseBranch,
-        conversationHistoryLength: prContext.conversationHistory.length
-      });
+        // Generate response using the chat system
+        log.debug('Generating response using chat system');
+        const response = await chat.respondToMention(userQuery, prContext);
 
-      // Generate response using the chat system
-      log.debug('Generating response using chat system');
-      const response = await chat.respondToMention(userQuery, prContext);
+        log.debug('Response generated', { responseLength: response.length });
 
-      log.debug('Response generated', { responseLength: response.length });
+        // Post the response
+        log.debug('Posting response comment');
+        await context.octokit.issues.createComment({
+            owner: repo.owner,
+            repo: repo.repo,
+            issue_number: prNumber,
+            body: response,
+        });
 
-      // Post the response
-      log.debug('Posting response comment');
-      await context.octokit.issues.createComment({
-        owner: repo.owner,
-        repo: repo.repo,
-        issue_number: prNumber,
-        body: response,
-      });
-
-      log.info(`Responded to mention in PR #${prNumber}`);
+        log.info(`Responded to mention in PR #${prNumber}`);
     } catch (error) {
-      log.error('Error handling mention:', error);
-      
-      // Post error response
-      await context.octokit.issues.createComment({
-        owner: repo.owner,
-        repo: repo.repo,
-        issue_number: context.payload.issue.number,
-        body: 'Sorry, I encountered an error while processing your request. Please try again later.',
-      });
+        log.error('Error handling mention:', error);
+        await postErrorComment(context, context.payload.issue.number, 'Sorry, I encountered an error while processing your request. Please try again later.');
     }
-  });
+};
 
-  app.on(
-    ['pull_request.opened', 'pull_request.synchronize', 'pull_request.reopened'],
-    async (context) => {
-      const repo = context.repo();
-      const chat = await loadChat(context);
+const handlePullRequestEvents = async (context: any) => {
+    const repo = context.repo();
+    const chat = await loadChat(context);
 
-      if (!chat) {
+    if (!chat) {
         log.info('Chat initialized failed');
         return 'no chat';
-      }
+    }
 
-      const pull_request = context.payload.pull_request;
+    const pull_request = context.payload.pull_request;
 
-      if (
-        pull_request.state === 'closed' ||
-        pull_request.locked
-      ) {
+    if (pull_request.state === 'closed' || pull_request.locked) {
         log.info('invalid event payload');
         return 'invalid event payload';
-      }
+    }
 
-      const data = await context.octokit.repos.compareCommits({
+    const data = await context.octokit.repos.compareCommits({
         owner: repo.owner,
         repo: repo.repo,
         base: context.payload.pull_request.base.sha,
         head: context.payload.pull_request.head.sha,
-      });
+    });
 
-      let { files: changedFiles, commits } = data.data;
+    let { files: changedFiles, commits } = data.data;
 
-      if (context.payload.action === 'synchronize' && commits.length >= 2) {
+    if (context.payload.action === 'synchronize' && commits.length >= 2) {
         const {
-          data: { files },
+            data: { files },
         } = await context.octokit.repos.compareCommits({
-          owner: repo.owner,
-          repo: repo.repo,
-          base: commits[commits.length - 2].sha,
-          head: commits[commits.length - 1].sha,
+            owner: repo.owner,
+            repo: repo.repo,
+            base: commits[commits.length - 2].sha,
+            head: commits[commits.length - 1].sha,
         });
 
         changedFiles = files;
-      }
+    }
 
-      const ignoreList = (process.env.IGNORE || process.env.ignore || '')
-        .split('\n')
-        .filter((v) => v !== '');
-      const ignorePatterns = (process.env.IGNORE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
-      const includePatterns = (process.env.INCLUDE_PATTERNS || '').split(',').filter((v) => Boolean(v.trim()));
+    changedFiles = filterChangedFiles(changedFiles || []);
 
-      // log.debug('ignoreList:', ignoreList);
-      // log.debug('ignorePatterns:', ignorePatterns);
-      // log.debug('includePatterns:', includePatterns);
-
-      changedFiles = changedFiles?.filter(
-        (file) => {
-          const url = new URL(file.contents_url);
-          const pathname = decodeURIComponent(url.pathname);
-          // if includePatterns is not empty, only include files that match the pattern
-          if (includePatterns.length) {
-            return matchPatterns(includePatterns, pathname);
-          }
-
-          if (ignoreList.includes(file.filename)) {
-            return false;
-          }
-
-          // if ignorePatterns is not empty, ignore files that match the pattern
-          if (ignorePatterns.length) {
-            return !matchPatterns(ignorePatterns, pathname);
-          }
-
-          return true;
-        });
-
-      if (!changedFiles?.length) {
+    if (!changedFiles?.length) {
         log.info('no change found');
         return 'no change';
-      }
+    }
 
-      console.time('total review time');
+    console.time('total review time');
 
-      const reviews = [];
+    const reviews = await processFileReviews(changedFiles, chat);
 
-      for (let i = 0; i < changedFiles.length; i++) {
-        const file = changedFiles[i];
+    try {
+        if (reviews.length > 0) {
+            // Create individual comments for each file with issues
+            for (const review of reviews) {
+                await context.octokit.issues.createComment({
+                    repo: repo.repo,
+                    owner: repo.owner,
+                    issue_number: context.pullRequest().pull_number,
+                    body: `## 📄 ${review.path}\n\n${review.body}`,
+                });
+            }
+        } else {
+            // Create a simple LGTM comment
+            await context.octokit.issues.createComment({
+                repo: repo.repo,
+                owner: repo.owner,
+                issue_number: context.pullRequest().pull_number,
+                body: "🚀 **Code Review Complete** - All changes look good! LGTM 👍",
+            });
+        }
+    } catch (e) {
+        log.info(`Failed to create review comments`, e);
+    }
+
+    console.timeEnd('total review time');
+    log.info('successfully reviewed', context.payload.pull_request.html_url);
+
+    return 'success';
+};
+
+const analyzePatchContext = (patch: string) => {
+    const lines = patch.split('\n');
+    let addedLines = 0;
+    let deletedLines = 0;
+    let contextLines = 0;
+    let hasLogicChanges = false;
+    let hasStructuralChanges = false;
+    let isFormatting = true;
+
+    for (const line of lines) {
+        if (line.startsWith('+')) {
+            addedLines++;
+            const content = line.substring(1).trim();
+            if (content && !isWhitespaceOrFormatting(content)) {
+                isFormatting = false;
+                if (hasLogicalContent(content)) {
+                    hasLogicChanges = true;
+                }
+                if (hasStructuralContent(content)) {
+                    hasStructuralChanges = true;
+                }
+            }
+        } else if (line.startsWith('-')) {
+            deletedLines++;
+            const content = line.substring(1).trim();
+            if (content && !isWhitespaceOrFormatting(content)) {
+                isFormatting = false;
+                if (hasLogicalContent(content)) {
+                    hasLogicChanges = true;
+                }
+            }
+        } else if (line.startsWith(' ')) {
+            contextLines++;
+        }
+    }
+
+    return {
+        addedLines,
+        deletedLines,
+        contextLines,
+        hasLogicChanges,
+        hasStructuralChanges,
+        isFormatting,
+        isMinorChange: (addedLines + deletedLines) <= 3 && !hasLogicChanges,
+        isRefactoring: deletedLines > 0 && addedLines > 0 && !hasStructuralChanges
+    };
+};
+
+const isWhitespaceOrFormatting = (content: string): boolean => {
+    return /^\s*$/.test(content) ||
+        /^[{}()\[\];,]*$/.test(content) ||
+        /^\s*(import|from)\s/.test(content) ||
+        /^\s*(\/\/|\/\*|\*|\*\/|#)/.test(content);
+};
+
+const hasLogicalContent = (content: string): boolean => {
+    return /\b(if|else|for|while|function|class|return|throw|catch|try)\b/.test(content) ||
+        /[=<>!]=/.test(content) ||
+        /\w+\s*\(.*\)/.test(content) ||
+        /\w+\s*[=:]/.test(content);
+};
+
+const hasStructuralContent = (content: string): boolean => {
+    return /\b(class|interface|function|export|import)\b/.test(content) ||
+        /^\s*(public|private|protected|static)/.test(content);
+};
+
+const shouldSkipReview = (patchContext: any, filename: string): boolean => {
+    // Skip pure formatting changes
+    if (patchContext.isFormatting) {
+        log.debug(`Skipping ${filename}: pure formatting changes`);
+        return true;
+    }
+
+    // Skip very minor changes without logic
+    if (patchContext.isMinorChange && !patchContext.hasLogicChanges) {
+        log.debug(`Skipping ${filename}: minor change without logic changes`);
+        return true;
+    }
+
+    // Skip generated files
+    if (isGeneratedFile(filename)) {
+        log.debug(`Skipping ${filename}: generated file`);
+        return true;
+    }
+
+    return false;
+};
+
+const isGeneratedFile = (filename: string): boolean => {
+    const generatedPatterns = [
+        /\.lock$/,
+        /package-lock\.json$/,
+        /yarn\.lock$/,
+        /\.min\.(js|css)$/,
+        /\.d\.ts$/,
+        /dist\/.*$/,
+        /build\/.*$/,
+        /\.generated\./,
+    ];
+
+    return generatedPatterns.some(pattern => pattern.test(filename));
+};
+
+
+
+const processFileReviews = async (changedFiles: any[], chat: Chat) => {
+    const reviews = [];
+
+    // First pass: analyze all patches to understand the overall change context
+    const fileContexts = changedFiles.map(file => ({
+        ...file,
+        patchContext: analyzePatchContext(file.patch || '')
+    }));
+
+    // Filter out files that don't need review
+    const filesToReview = fileContexts.filter(file => {
+        if (file.status !== 'modified' && file.status !== 'added') {
+            return false;
+        }
+
+        const patch = file.patch || '';
+        if (!patch || patch.length > MAX_PATCH_COUNT) {
+            log.info(`${file.filename} skipped: diff too large`);
+            return false;
+        }
+
+        if (shouldSkipReview(file.patchContext, file.filename)) {
+            return false;
+        }
+
+        return true;
+    });
+
+    log.info(`Reviewing ${filesToReview.length} out of ${changedFiles.length} changed files`);
+
+    // Review only meaningful changes
+    for (const file of filesToReview) {
         const patch = file.patch || '';
 
-        if (file.status !== 'modified' && file.status !== 'added') {
-          continue;
-        }
-
-        if (!patch || patch.length > MAX_PATCH_COUNT) {
-          log.info(
-            `${file.filename} skipped caused by its diff is too large`
-          );
-          continue;
-        }
         try {
-          log.debug(`Starting code review for file: ${file.filename}`);
-          const res = await chat?.codeReview(patch) as { lgtm: boolean, review_comment: string };
-          const lgtm = res.lgtm;
-          let reviewComment = res.review_comment;
+            log.debug(`Code review for ${file.filename}: ${file.patchContext.addedLines}+ ${file.patchContext.deletedLines}-`);
 
-          // Fix Markdown formatting: replace literal '\\n' with '\n'
-          if (typeof reviewComment === 'string') {
-            reviewComment = reviewComment.replace(/\\n/g, '\n');
-            // If it's a single line with multiple '*', insert '\n' before each '*' (except the first one)
-            if (!reviewComment.includes('\n') && (reviewComment.match(/\*/g) || []).length > 1) {
-              reviewComment = reviewComment.replace(/\s*\*/g, '\n*').replace(/^\n/, '');
-            }
-          }
+            // Enhanced review with patch context
+            const res = await chat?.codeReview(patch, {
+                filename: file.filename,
+                context: file.patchContext,
+                relatedFiles: filesToReview.map(f => f.filename)
+            }) as { lgtm: boolean, review_comment: string };
 
-          console.log('lgtm in bot:', lgtm);
-          console.log('reviewComment in bot:', reviewComment);
-          const lgtmStatus = lgtm ? '✅ LGTM' : '❌ Needs Changes';
-          log.debug("================================================")
-          log.debug(`LGTM status for ${file.filename}: ${lgtmStatus}`);
-          log.debug(`Type of lgtm: ${typeof lgtm}`);
-          log.debug("================================================")
-          const formattedBody = `> ### ${lgtmStatus}\n\n${reviewComment}`;
-          
-          const preview = formattedBody?.length > 150 ? `${formattedBody.slice(0, 150)}...` : formattedBody;
-          log.debug(`Review comment for ${file.filename}: ${preview}`);
+            const lgtm = res.lgtm;
+            const reviewComment = res.review_comment;
 
-          if (reviewComment) {
-            // Robust patch position calculation
-            let position = null;
-            if (patch) {
-              const patchLines = patch.split('\n');
-              let lineNumber = 0;
-              
-              for (let j = 0; j < patchLines.length; j++) {
-                const line = patchLines[j];
-                
-                // Parse hunk header to get starting line number
-                if (line.startsWith('@@')) {
-                  const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-                  if (match) {
-                    lineNumber = parseInt(match[1], 10) - 1; // Convert to 0-based
-                  }
-                  continue;
-                }
-                
-                // Skip file headers
-                if (line.startsWith('---') || line.startsWith('+++')) continue;
-                
-                // Track line numbers for context and added lines
-                if (line.startsWith(' ') || line.startsWith('+')) {
-                  lineNumber++;
-                }
-                
-                // Find the first added line for position
-                if (line.startsWith('+') && !line.startsWith('+++') && position === null) {
-                  position = lineNumber;
-                }
-              }
-            }
-            if (position !== null) {
-              const reviewData = {
-                path: file.filename,
-                body: formattedBody,
-                position,
-              };
-              reviews.push(reviewData);
+            // Only comment if there are actual issues
+            if (!lgtm && reviewComment && reviewComment.trim() !== 'LGTM') {
+                const formattedBody = formatReviewComment(lgtm, reviewComment);
+                reviews.push({
+                    path: file.filename,
+                    body: formattedBody,
+                });
+
+                log.debug(`Review comment added for ${file.filename}`);
             } else {
-              log.debug(`No valid position found in patch for ${file.filename}, skipping comment.`);
+                log.debug(`${file.filename}: LGTM - no comment needed`);
             }
-          } else {
-            log.debug(`No review comment generated for ${file.filename}`);
-          }
         } catch (e) {
-          log.info(`review ${file.filename} failed`, e);
+            log.error(`Review failed for ${file.filename}:`, e);
         }
-      }
-      try {
-        await context.octokit.pulls.createReview({
-          repo: repo.repo,
-          owner: repo.owner,
-          pull_number: context.pullRequest().pull_number,
-          body: reviews.length ? "Code review by Compound Reviewer" : "LGTM 👍",
-          event: 'COMMENT',
-          commit_id: commits[commits.length - 1].sha,
-          comments: reviews,
-        });
-      } catch (e) {
-        log.info(`Failed to create review`, e);
-      }
-
-      console.timeEnd('total review time');
-      log.info(
-        'successfully reviewed',
-        context.payload.pull_request.html_url
-      );
-
-      return 'success';
     }
-  );
 
-  app.on('pull_request_review_comment.created', async (context) => {
+    return reviews;
+};
+
+const handlePullRequestReviewComment = async (context: any) => {
     const comment = context.payload.comment;
     const botName = 'compound-reviewer';
 
     // Only respond if bot is mentioned at the start
-    const firstWord = comment.body.trim().split(/\s+/)[0];
-    if (firstWord !== `@${botName}` && firstWord !== botName) {
-      return;
+    if (!isBotMentioned(comment.body, botName)) {
+        return;
     }
 
     // Get PR info
@@ -406,98 +533,80 @@ export const robot = (app: Probot) => {
     const chat = await loadChat(context);
     if (!chat) return;
 
-    // Get PR details
-    const pullRequest = await context.octokit.pulls.get({
-      owner: repo.owner,
-      repo: repo.repo,
-      pull_number: prNumber,
-    });
+    try {
+        // Get PR details
+        const pullRequest = await context.octokit.pulls.get({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: prNumber,
+        });
 
-    // Get PR diff
-    const prDiff = await context.octokit.pulls.get({
-      owner: repo.owner,
-      repo: repo.repo,
-      pull_number: prNumber,
-      mediaType: { format: 'diff' },
-    });
+        // Get PR diff
+        const prDiff = await context.octokit.pulls.get({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: prNumber,
+            mediaType: { format: 'diff' },
+        });
 
-    // Get recent review comments for context
-    const reviewComments = await context.octokit.pulls.listReviewComments({
-      owner: repo.owner,
-      repo: repo.repo,
-      pull_number: prNumber,
-      per_page: 10,
-    });
+        // Get recent review comments for context
+        const reviewComments = await context.octokit.pulls.listReviewComments({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: prNumber,
+            per_page: 10,
+        });
 
-    // Get the parent comment (the one being replied to)
-    let parentComment = null;
-    if (comment.in_reply_to_id) {
-      parentComment = await context.octokit.pulls.getReviewComment({
-        owner: repo.owner,
-        repo: repo.repo,
-        comment_id: comment.in_reply_to_id,
-      });
-    }
-
-    // Extract user query
-    const userQuery = comment.body
-      .replace(new RegExp(`@${botName}`, 'gi'), '')
-      .replace(new RegExp(botName, 'gi'), '')
-      .trim();
-
-    // Build context for the AI
-    const prContext = {
-      title: pullRequest.data.title,
-      description: pullRequest.data.body || '',
-      author: pullRequest.data.user?.login || 'unknown',
-      branch: pullRequest.data.head.ref,
-      baseBranch: pullRequest.data.base.ref,
-      diff: prDiff.data,
-      conversationHistory: reviewComments.data.slice(-5).map(c => ({
-        author: c.user?.login || 'unknown',
-        body: c.body,
-        createdAt: c.created_at,
-      })),
-      parentReviewComment: parentComment ? {
-        author: parentComment.data.user?.login || 'unknown',
-        body: parentComment.data.body,
-        createdAt: parentComment.data.created_at,
-      } : null,
-    };
-
-    // Generate response using the chat system
-    const response = await chat.respondToMention(userQuery, prContext);
-
-    // Quote the original review comment
-    const quoted = comment.body
-      .split('\n')
-      .map(line => `> ${line}`)
-      .join('\n');
-
-    // Compose the reply
-    const replyBody = `${quoted}\n\n---\n${response}`;
-
-    // Post the response as a new top-level PR comment
-    await context.octokit.issues.createComment({
-      owner: repo.owner,
-      repo: repo.repo,
-      issue_number: prNumber,
-      body: replyBody,
-    });
-  });
-
-  const matchPatterns = (patterns: string[], path: string) => {
-    return patterns.some((pattern) => {
-      try {
-        return minimatch(path, pattern.startsWith('/') ? "**" + pattern : pattern.startsWith("**") ? pattern : "**/" + pattern);
-      } catch {
-        // if the pattern is not a valid glob pattern, try to match it as a regular expression
-        try {
-          return new RegExp(pattern).test(path);
-        } catch (e) {
-          return false;
+        // Get the parent comment (the one being replied to)
+        let parentComment = null;
+        if (comment.in_reply_to_id) {
+            parentComment = await context.octokit.pulls.getReviewComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                comment_id: comment.in_reply_to_id,
+            });
         }
-      }
-    })
-  }
-}
+
+        // Extract user query
+        const userQuery = extractUserQuery(comment.body, botName);
+
+        // Build context for the AI
+        const prContext = buildPRContext(pullRequest, prDiff, reviewComments.data, parentComment);
+
+        // Generate response using the chat system
+        const response = await chat.respondToMention(userQuery, prContext);
+
+        // Quote the original review comment
+        const quoted = comment.body
+            .split('\n')
+            .map((line: string) => `> ${line}`)
+            .join('\n');
+
+        // Compose the reply
+        const replyBody = `${quoted}\n\n---\n${response}`;
+
+        // Post the response as a new top-level PR comment
+        await context.octokit.issues.createComment({
+            owner: repo.owner,
+            repo: repo.repo,
+            issue_number: prNumber,
+            body: replyBody,
+        });
+    } catch (error) {
+        log.error('Error handling review comment mention:', error);
+    }
+};
+
+export const robot = (app: Probot) => {
+    // Handle mentions in comments
+    app.on('issue_comment.created', handleIssueComment);
+
+    // Handle PR events
+    app.on(
+        ['pull_request.opened', 'pull_request.synchronize', 'pull_request.reopened'],
+        handlePullRequestEvents
+    );
+
+    // Handle review comment mentions
+    app.on('pull_request_review_comment.created', handlePullRequestReviewComment);
+};
