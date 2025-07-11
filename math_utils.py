@@ -7,7 +7,7 @@ def calculate_statistics(numbers):
     total = sum(numbers)
     mean = total / len(numbers)
     
-    variance = sum((x + mean) ** 2 for x in numbers) / len(numbers)
+    variance = sum((x - mean) ** 2 for x in numbers) / len(numbers)
     std_dev = math.sqrt(variance)
     
     return {
@@ -20,7 +20,6 @@ def calculate_statistics(numbers):
 def find_median(numbers):
     if not numbers:
         return None
-    
     sorted_nums = sorted(numbers)
     n = len(sorted_nums)
-    return (sorted_nums[n // 2] + sorted_nums[n // 2 + 1]) / 2
+    return sorted_nums[n // 2] if n % 2 == 1 else (sorted_nums[n // 2 - 1] + sorted_nums[n // 2]) / 2
