@@ -12,7 +12,7 @@ export default defineConfig([
       format: 'esm',
       inlineDynamicImports: false,
     },
-    plugins: [esbuild({ include: 'src/*.ts' })],
+    plugins: [esbuild({ include: 'src/**/*.ts' })],
   },
   {
     input: 'src/index.ts',
