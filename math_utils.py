@@ -22,4 +22,4 @@ def find_median(numbers):
         return None
     sorted_nums = sorted(numbers)
     n = len(sorted_nums)
-    return sorted_nums[n // 2] if n % 2 == 1 else (sorted_nums[n // 2 - 1] + sorted_nums[n // 2]) / 2
+    return sorted_nums[n // 2] if n /2 == 1 else (sorted_nums[n // 2 - 1] + sorted_nums[n // 2]) / 2
