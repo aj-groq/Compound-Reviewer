@@ -2,6 +2,7 @@ import { Context, Probot } from 'probot';
 import { minimatch } from 'minimatch'
 
 import { Chat } from './chat.js';
+import { ModelRouter } from './models/ModelRouter.js';
 import log from 'loglevel';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -41,6 +42,97 @@ export const robot = (app: Probot) => {
       });
       return null;
     }
+  };
+
+  const loadModelRouter = async (context: Context): Promise<ModelRouter | null> => {
+    if (GROQ_API_KEY) {
+      return new ModelRouter(GROQ_API_KEY);
+    }
+
+    const repo = context.repo();
+
+    try {
+      const { data } = (await context.octokit.request(
+        'GET /repos/{owner}/{repo}/actions/variables/{name}',
+        {
+          owner: repo.owner,
+          repo: repo.repo,
+          name: 'GROQ_API_KEY',
+        }
+      )) as any;
+
+      if (!data?.value) {
+        return null;
+      }
+
+      return new ModelRouter(data.value);
+    } catch {
+      await context.octokit.issues.createComment({
+        repo: repo.repo,
+        owner: repo.owner,
+        issue_number: context.pullRequest().pull_number,
+        body: `Seems you are using me but didn't get GROQ_API_KEY set in Variables/Secrets for this repo.`,
+      });
+      return null;
+    }
+  };
+
+  const calculatePositionFromLines = (patch: string, lines: { from: number; to: number }): number | null => {
+    const patchLines = patch.split('\n');
+    let currentLine = 0;
+    let targetLine = lines.from;
+    
+    for (let i = 0; i < patchLines.length; i++) {
+      const line = patchLines[i];
+      
+      // Parse hunk header to get starting line number
+      if (line.startsWith('@@')) {
+        const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (match) {
+          currentLine = parseInt(match[1], 10) - 1; // Convert to 0-based
+        }
+        continue;
+      }
+      
+      // Skip file headers
+      if (line.startsWith('---') || line.startsWith('+++')) continue;
+      
+      // Track line numbers for context and added lines
+      if (line.startsWith(' ') || line.startsWith('+')) {
+        currentLine++;
+        
+        // Return position when we reach the target line
+        if (currentLine >= targetLine && line.startsWith('+')) {
+          return currentLine;
+        }
+      }
+    }
+    
+    // Fallback: return first added line position
+    currentLine = 0;
+    for (let i = 0; i < patchLines.length; i++) {
+      const line = patchLines[i];
+      
+      if (line.startsWith('@@')) {
+        const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (match) {
+          currentLine = parseInt(match[1], 10) - 1;
+        }
+        continue;
+      }
+      
+      if (line.startsWith('---') || line.startsWith('+++')) continue;
+      
+      if (line.startsWith(' ') || line.startsWith('+')) {
+        currentLine++;
+      }
+      
+      if (line.startsWith('+') && !line.startsWith('+++')) {
+        return currentLine;
+      }
+    }
+    
+    return null;
   };
 
   // Handle mentions in comments
@@ -273,105 +365,92 @@ export const robot = (app: Probot) => {
 
       console.time('total review time');
 
+      // Load the new 3-model router
+      const modelRouter = await loadModelRouter(context);
+      if (!modelRouter) {
+        log.info('ModelRouter initialization failed');
+        return 'no model router';
+      }
+
+      // Prepare files for the 3-model pipeline
+      const reviewFiles = changedFiles
+        ?.filter(file => {
+          if (file.status !== 'modified' && file.status !== 'added') {
+            return false;
+          }
+          const patch = file.patch || '';
+          if (!patch || patch.length > MAX_PATCH_COUNT) {
+            log.info(`${file.filename} skipped caused by its diff is too large`);
+            return false;
+          }
+          return true;
+        })
+        .map(file => ({
+          filename: file.filename,
+          patch: file.patch || '',
+          status: file.status
+        })) || [];
+
+      if (reviewFiles.length === 0) {
+        log.info('No files to review after filtering');
+        return 'no files to review';
+      }
+
+      // Process all files through the 3-model pipeline
+      const reviewResults = await modelRouter.reviewAllFiles(reviewFiles);
+      log.debug(`3-model pipeline completed. Results: ${reviewResults.length}`);
+
       const reviews = [];
 
-      for (let i = 0; i < changedFiles.length; i++) {
-        const file = changedFiles[i];
-        const patch = file.patch || '';
-
-        if (file.status !== 'modified' && file.status !== 'added') {
+      for (const result of reviewResults) {
+        if (!result.review_comment) {
           continue;
         }
 
-        if (!patch || patch.length > MAX_PATCH_COUNT) {
-          log.info(
-            `${file.filename} skipped caused by its diff is too large`
-          );
-          continue;
-        }
-        try {
-          log.debug(`Starting code review for file: ${file.filename}`);
-          const res = await chat?.codeReview(patch) as { lgtm: boolean, review_comment: string };
-          const lgtm = res.lgtm;
-          let reviewComment = res.review_comment;
+        const lgtmStatus = result.lgtm ? '✅ LGTM' : '❌ Needs Changes';
+        const formattedBody = `> ### ${lgtmStatus}\n\n${result.review_comment}`;
+        
+        const preview = formattedBody?.length > 150 ? `${formattedBody.slice(0, 150)}...` : formattedBody;
+        log.debug(`Review comment preview: ${preview}`);
 
-          // Fix Markdown formatting: replace literal '\\n' with '\n'
-          if (typeof reviewComment === 'string') {
-            reviewComment = reviewComment.replace(/\\n/g, '\n');
-            // If it's a single line with multiple '*', insert '\n' before each '*' (except the first one)
-            if (!reviewComment.includes('\n') && (reviewComment.match(/\*/g) || []).length > 1) {
-              reviewComment = reviewComment.replace(/\s*\*/g, '\n*').replace(/^\n/, '');
-            }
-          }
-
-          console.log('lgtm in bot:', lgtm);
-          console.log('reviewComment in bot:', reviewComment);
-          const lgtmStatus = lgtm ? '✅ LGTM' : '❌ Needs Changes';
-          log.debug("================================================")
-          log.debug(`LGTM status for ${file.filename}: ${lgtmStatus}`);
-          log.debug(`Type of lgtm: ${typeof lgtm}`);
-          log.debug("================================================")
-          const formattedBody = `> ### ${lgtmStatus}\n\n${reviewComment}`;
+        // Calculate position for GitHub API
+        let position = null;
+        if (result.lines && reviewFiles.length > 0) {
+          // Find the corresponding file to calculate position
+          const matchingFile = reviewFiles.find(f => 
+            result.review_comment.includes(f.filename) || reviewFiles.length === 1
+          ) || reviewFiles[0];
           
-          const preview = formattedBody?.length > 150 ? `${formattedBody.slice(0, 150)}...` : formattedBody;
-          log.debug(`Review comment for ${file.filename}: ${preview}`);
+          position = calculatePositionFromLines(matchingFile.patch, result.lines);
+        }
 
-          if (reviewComment) {
-            // Robust patch position calculation
-            let position = null;
-            if (patch) {
-              const patchLines = patch.split('\n');
-              let lineNumber = 0;
-              
-              for (let j = 0; j < patchLines.length; j++) {
-                const line = patchLines[j];
-                
-                // Parse hunk header to get starting line number
-                if (line.startsWith('@@')) {
-                  const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-                  if (match) {
-                    lineNumber = parseInt(match[1], 10) - 1; // Convert to 0-based
-                  }
-                  continue;
-                }
-                
-                // Skip file headers
-                if (line.startsWith('---') || line.startsWith('+++')) continue;
-                
-                // Track line numbers for context and added lines
-                if (line.startsWith(' ') || line.startsWith('+')) {
-                  lineNumber++;
-                }
-                
-                // Find the first added line for position
-                if (line.startsWith('+') && !line.startsWith('+++') && position === null) {
-                  position = lineNumber;
-                }
-              }
-            }
-            if (position !== null) {
-              const reviewData = {
-                path: file.filename,
-                body: formattedBody,
-                position,
-              };
-              reviews.push(reviewData);
-            } else {
-              log.debug(`No valid position found in patch for ${file.filename}, skipping comment.`);
-            }
-          } else {
-            log.debug(`No review comment generated for ${file.filename}`);
-          }
-        } catch (e) {
-          log.info(`review ${file.filename} failed`, e);
+        if (position !== null && reviewFiles.length === 1) {
+          const reviewData = {
+            path: reviewFiles[0].filename,
+            body: formattedBody,
+            position,
+          };
+          reviews.push(reviewData);
+        } else if (reviewFiles.length > 1) {
+          // For multi-file reviews, create general comment
+          log.debug('Multi-file review detected, will post as general comment');
         }
       }
       try {
+        // Determine review body based on results
+        let reviewBody = "Code review by Compound Reviewer (3-Model Pipeline)";
+        
+        if (reviewResults.length === 1 && reviewResults[0].lgtm) {
+          reviewBody = reviewResults[0].review_comment;
+        } else if (reviews.length === 0) {
+          reviewBody = "LGTM 👍 All changes look good!";
+        }
+
         await context.octokit.pulls.createReview({
           repo: repo.repo,
           owner: repo.owner,
           pull_number: context.pullRequest().pull_number,
-          body: reviews.length ? "Code review by Compound Reviewer" : "LGTM 👍",
+          body: reviewBody,
           event: 'COMMENT',
           commit_id: commits[commits.length - 1].sha,
           comments: reviews,
