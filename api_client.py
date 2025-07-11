@@ -29,9 +29,10 @@ def get_weather(city):
         response.raise_for_status()
         
         data = response.json()
-        weather_list = data.get('weather', [])
-        if weather_list:
-            return weather_list[0].get('description')
+        if isinstance(data, dict):
+            weather_list = data.get('weather', [])
+            if weather_list:
+                return weather_list[0].get('description')
         return None
     except (requests.RequestException, ValueError, KeyError, IndexError):
         return None
