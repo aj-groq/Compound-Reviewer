@@ -96,27 +96,22 @@ ${reviewResult.review_comment}
 **FILE:** ${file.filename} (Lines ${reviewResult.lines.from}-${reviewResult.lines.to})
 
 **RULES:**
-- Keep it concise and focused - avoid verbose explanations
-- Set lgtm: false for critical issues, logic errors, security problems
-- Set lgtm: true for style suggestions, minor improvements
-- Use clear, direct language without unnecessary detail
-- Structure with simple headers and bullet points
-- Escape quotes and newlines properly in JSON
-- NO multi-line code blocks with triple quotes in review_comment
-- Show complete fixed lines instead of separate "Issue" and "Suggestion"
-- Group related issues under clear headings
+- Be concise and direct - minimize total lines
+- Set lgtm: false for critical issues, logic errors, security problems; true for style/minor improvements
+- Use clear headers and bullet points, escape JSON properly
+- NO multi-line code blocks with triple quotes
+- Show complete fixed lines, group related issues
 - Make suggestions specific and actionable
-
 - If you use a tool, include a block like:
   > **🔧 Tool Used:** code execution
   > **➡️ Input:** tested median([1,3,5])
   > **⬅️ Output:** returned 2.66 instead of 3
   > **💥 Impact:** incorrect median for odd arrays
 
-**OUTPUT JSON (must be valid JSON):**
+**OUTPUT JSON:**
 {
   "lgtm": boolean,
-  "review_comment": "clean, readable markdown with proper JSON escaping and clear structure",
+  "review_comment": "clean markdown with proper JSON escaping",
   "lines": {"from": ${reviewResult.lines.from}, "to": ${reviewResult.lines.to}}
 }`;
     }
