@@ -28,17 +28,18 @@
 
         html, body {
             height: 100%;
-            overflow: hidden;
         }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             background: var(--black);
             color: var(--white);
+            min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
+            padding-top: 3rem;
         }
 
         /* Background animation */
@@ -100,7 +101,7 @@
         .container {
             text-align: center;
             z-index: 10;
-            padding: 2rem;
+            padding: 4rem 2rem 2rem;
             max-width: 900px;
             width: 100%;
         }
@@ -347,7 +348,9 @@
             margin: 0.5rem 0;
             opacity: 0;
             animation: fadeInLine 0.5s ease forwards;
-            white-space: pre;
+            white-space: pre-wrap;
+            overflow-wrap: break-word;
+            word-wrap: break-word;
         }
 
         .code-line:nth-child(1) { animation-delay: 0.5s; }
@@ -542,56 +545,185 @@
 
         /* Responsive */
         @media (max-width: 768px) {
+            body {
+                padding: 2rem 1rem;
+                min-height: auto;
+                align-items: flex-start;
+            }
+
+            .container {
+                padding: 1rem;
+                margin-top: 0;
+            }
+
+            .logo-section {
+                margin-bottom: 1.5rem;
+            }
+
             .logo {
-                font-size: 2.5rem;
+                font-size: 2.2rem;
+                letter-spacing: -1px;
             }
 
             .subtitle {
-                font-size: 1.2rem;
+                font-size: 1.1rem;
+                margin-bottom: 1.5rem;
+                height: auto;
+            }
+
+            .typewriter {
+                width: 100%;
+                white-space: normal;
+                animation: none;
+                border: none;
+            }
+
+            .cta-container {
+                margin-bottom: 2rem;
             }
 
             .cta-button {
-                font-size: 1.1rem;
-                padding: 1rem 2.5rem;
+                font-size: 1rem;
+                padding: 0.875rem 2rem;
+                width: 100%;
+                max-width: 280px;
+                justify-content: center;
             }
 
             .review-animation {
                 height: auto;
                 flex-direction: column;
-                max-width: 600px;
+                width: 100%;
+                gap: 1rem;
+                margin: 0;
             }
 
-            .code-window {
+            .code-window, .pr-review {
                 padding: 1rem;
+                width: 100%;
+                max-width: none;
             }
 
             .code-content {
-                font-size: 0.8rem;
+                font-size: 0.75rem;
+                overflow-x: auto;
+            }
+
+            .code-line {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
             }
 
             .pr-review {
                 flex: 1;
-                width: 100%;
                 animation-delay: 2s;
             }
 
             .pr-comment {
-                font-size: 0.9rem;
+                font-size: 0.85rem;
+                padding: 0.75rem;
+            }
+
+            .pr-suggestion {
+                font-size: 0.75rem;
+                overflow-x: auto;
+            }
+
+            .pr-actions {
+                flex-wrap: wrap;
+            }
+
+            .pr-action {
+                flex: 1;
+                min-width: 100px;
             }
         }
 
-        @media (max-height: 700px) {
+        @media (max-width: 480px) {
+            body {
+                padding: 1.5rem 0.75rem;
+            }
+
+            .container {
+                padding: 0.75rem;
+            }
+
             .logo {
-                font-size: 3rem;
-                margin-bottom: 1.5rem;
+                font-size: 1.75rem;
+                letter-spacing: -0.5px;
             }
 
             .subtitle {
-                margin-bottom: 2rem;
+                font-size: 0.95rem;
+            }
+
+            .cta-button {
+                font-size: 0.95rem;
+                padding: 0.75rem 1.5rem;
+                justify-content: center;
+            }
+
+            .code-window, .pr-review {
+                padding: 0.75rem;
+            }
+
+            .code-content {
+                font-size: 0.9rem;
+            }
+            .code-line {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
+            .pr-comment {
+                font-size: 0.8rem;
+            }
+        }
+
+        @media (max-height: 700px) and (min-width: 769px) {
+            body {
+                padding-top: 2rem;
+            }
+
+            .logo {
+                font-size: 2.5rem;
+                margin-bottom: 1rem;
+            }
+
+            .subtitle {
+                margin-bottom: 1.5rem;
             }
 
             .review-animation {
                 height: 200px;
+            }
+        }
+
+        /* Small phones and landscape */
+        @media (max-width: 375px) {
+            .logo {
+                font-size: 1.5rem;
+            }
+
+            .subtitle {
+                font-size: 0.875rem;
+            }
+
+            .cta-button svg {
+                width: 20px;
+                height: 20px;
+            } .code-window, .pr-review {
+                padding: 0.75rem;
+            }
+
+            .code-content {
+                font-size: 2rem;
+            }
+            .code-line {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
             }
         }
     </style>
